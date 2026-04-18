@@ -45,11 +45,17 @@ async def test_config_flow_user_step_success(
     enable_custom_integrations: None,
 ):
     """Test a successful user configuration flow."""
-    with patch(
-        "custom_components.scrutiny.config_flow.ScrutinyConfigFlowHandler._test_connection",
-        new_callable=AsyncMock,
-        return_value=None,
-    ) as mock_test_connection:
+    with (
+        patch(
+            "custom_components.scrutiny.config_flow.ScrutinyConfigFlowHandler._test_connection",
+            new_callable=AsyncMock,
+            return_value=None,
+        ) as mock_test_connection,
+        patch(
+            "custom_components.scrutiny.async_setup_entry",
+            return_value=True,
+        ),
+    ):
         result = await hass.config_entries.flow.async_init(
             DOMAIN, context={"source": config_entries.SOURCE_USER}
         )
@@ -157,11 +163,17 @@ async def test_config_flow_user_step_defaults(
     enable_custom_integrations: None,
 ):
     """Test config flow uses defaults when only URL is provided."""
-    with patch(
-        "custom_components.scrutiny.config_flow.ScrutinyConfigFlowHandler._test_connection",
-        new_callable=AsyncMock,
-        return_value=None,
-    ) as mock_test_connection:
+    with (
+        patch(
+            "custom_components.scrutiny.config_flow.ScrutinyConfigFlowHandler._test_connection",
+            new_callable=AsyncMock,
+            return_value=None,
+        ) as mock_test_connection,
+        patch(
+            "custom_components.scrutiny.async_setup_entry",
+            return_value=True,
+        ),
+    ):
         result = await hass.config_entries.flow.async_init(
             DOMAIN, context={"source": config_entries.SOURCE_USER}
         )
