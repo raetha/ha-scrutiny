@@ -135,25 +135,21 @@ ATTR_DESCRIPTION: str = "description"  # Text description of the SMART attribute
 
 # Mapping for 'device_status' from the '/api/summary' endpoint.
 SCRUTINY_DEVICE_SUMMARY_STATUS_MAP: dict[int, str] = {
-    0: "Passed",  # Device is considered healthy.
-    1: "Failed (S.M.A.R.T.)",  # Device failed due to SMART attributes.
-    2: "Failed (Scrutiny)",  # Device failed based on Scrutiny's own checks.
+    0: "Passed",
+    1: "Failed (SMART)",  # S.M.A.R.T. failure — slugifies to 'failed_smart'
+    2: "Failed (Scrutiny)",  # Scrutiny threshold failure
 }
-SCRUTINY_DEVICE_SUMMARY_STATUS_UNKNOWN: str = (
-    "Unknown Summary Status"  # Fallback for unknown status codes.
-)
+SCRUTINY_DEVICE_SUMMARY_STATUS_UNKNOWN: str = "Unknown"
 
 # Mapping for the 'status' of individual SMART attributes
 # from '/api/device/.../details' -> smart_results[0].attrs[id].status.
 ATTR_SMART_STATUS_MAP: dict[int, str] = {
-    0: "Passed",  # Attribute is within normal parameters.
-    1: "Failed (S.M.A.R.T.)",  # Attribute has failed according to S.M.A.R.T.
-    2: "Warning (Scrutiny)",  # Scrutiny has issued a warning for this attribute.
-    4: "Failed (Scrutiny)",  # Scrutiny has marked this attribute as failed.
+    0: "Passed",
+    1: "Failed (SMART)",  # S.M.A.R.T. failure
+    2: "Warning (Scrutiny)",
+    4: "Failed (Scrutiny)",
 }
-ATTR_SMART_STATUS_UNKNOWN: str = (
-    "Unknown Attribute Status"  # Fallback for unknown attribute status codes.
-)
+ATTR_SMART_STATUS_UNKNOWN: str = "Unknown"
 
 
 # Platforms to set up for this integration (e.g., "sensor", "binary_sensor").

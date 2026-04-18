@@ -14,7 +14,7 @@
                     "enable_raw_values": "Enable raw value sensors for selected SMART attributes"
                 },
                 "data_description": {
-                    "url": "Full URL of your Scrutiny instance, e.g. http://scrutiny.local:8080 or https://scrutiny.example.com",
+                    "url": "Full base URL of your Scrutiny instance, including protocol and port.",
                     "verify_ssl": "Uncheck only if your Scrutiny instance uses a self-signed SSL certificate.",
                     "scan_interval": "How often to poll Scrutiny for updates, in minutes. Minimum 1.",
                     "show_archived": "When enabled, disks archived in Scrutiny are shown in Home Assistant, labelled [Archived]. When disabled, archived disks are hidden and their HA devices are removed automatically.",
@@ -31,7 +31,7 @@
                     "verify_ssl": "Verify SSL certificate"
                 },
                 "data_description": {
-                    "url": "Full URL of your Scrutiny instance, e.g. http://scrutiny.local:8080 or https://scrutiny.example.com",
+                    "url": "Full base URL of your Scrutiny instance, including protocol and port.",
                     "verify_ssl": "Uncheck only if your Scrutiny instance uses a self-signed SSL certificate."
                 }
             }
@@ -87,8 +87,9 @@
                 "name": "Overall Status",
                 "state": {
                     "passed": "Passed",
-                    "failed_smart": "Failed (S.M.A.R.T.)",
-                    "failed_scrutiny": "Failed (Scrutiny)"
+                    "failed_smart": "Failed (SMART)",
+                    "failed_scrutiny": "Failed (Scrutiny)",
+                    "unknown": "Unknown"
                 }
             },
             "capacity": {
@@ -98,12 +99,21 @@
                 "name": "SMART Test Result",
                 "state": {
                     "passed": "Passed",
-                    "failed_smart": "Failed (S.M.A.R.T.)",
+                    "failed_smart": "Failed (SMART)",
                     "warning_scrutiny": "Warning (Scrutiny)",
-                    "failed_scrutiny": "Failed (Scrutiny)"
+                    "failed_scrutiny": "Failed (Scrutiny)",
+                    "unknown": "Unknown"
                 }
             },
-            "smart_attribute": {},
+            "smart_attribute": {
+                "state": {
+                    "passed": "Passed",
+                    "failed_smart": "Failed (SMART)",
+                    "warning_scrutiny": "Warning (Scrutiny)",
+                    "failed_scrutiny": "Failed (Scrutiny)",
+                    "unknown": "Unknown"
+                }
+            },
             "last_smart_update": {
                 "name": "Last SMART Update"
             },
