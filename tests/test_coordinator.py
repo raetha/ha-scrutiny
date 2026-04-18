@@ -31,7 +31,6 @@ from custom_components.scrutiny.const import (
     ATTR_SMART_RESULTS,
     KEY_SUMMARY_DEVICE,
     KEY_SUMMARY_SMART,
-    KEY_DETAILS_DEVICE,
     KEY_DETAILS_SMART_LATEST,
     KEY_DETAILS_METADATA,
 )
@@ -105,6 +104,7 @@ async def create_mocked_coordinator(
     coordinator = ScrutinyDataUpdateCoordinator(
         hass=hass,
         logger=LOGGER,  # You could also pass a MagicMock() for the logger here
+        config_entry=None,
         name=f"{DOMAIN}-test-coordinator",
         api_client=mock_api_client,
         update_interval=timedelta(
@@ -196,7 +196,7 @@ async def test_coordinator_update_fails_on_summary_connection_error(
     # Check the type of the stored exception.
     # If your _async_update_data throws UpdateFailed, it should be UpdateFailed here.
     assert isinstance(coordinator.last_exception, UpdateFailed)
-    assert "Connection error during Scrutiny data update cycle" in str(
+    assert "Connection error during data update" in str(
         coordinator.last_exception
     )
     assert "Simulated summary connection error" in str(coordinator.last_exception)
@@ -256,7 +256,6 @@ async def test_coordinator_handles_partial_detail_failure(hass: HomeAssistant):
     # Data for wwn1 should be complete
     assert "wwn1" in updated_data
     assert updated_data["wwn1"][KEY_SUMMARY_DEVICE]["model_name"] == "DiskModelA_Sum"
-    assert updated_data["wwn1"][KEY_DETAILS_DEVICE]["model_name"] == "DiskModelA_Det"
     assert (
         updated_data["wwn1"][KEY_DETAILS_SMART_LATEST]["temp"] == 31
     )  # From MOCK_API_DETAILS_DATA_WWN1
@@ -265,7 +264,6 @@ async def test_coordinator_handles_partial_detail_failure(hass: HomeAssistant):
     # (according to your _process_detail_results logic, which sets empty dicts on exception)
     assert "wwn2" in updated_data
     assert updated_data["wwn2"][KEY_SUMMARY_DEVICE]["model_name"] == "DiskModelB_Sum"
-    assert updated_data["wwn2"][KEY_DETAILS_DEVICE] == {}
     assert updated_data["wwn2"][KEY_DETAILS_SMART_LATEST] == {}
     assert updated_data["wwn2"][KEY_DETAILS_METADATA] == {}
     print("SUCCESS: test_coordinator_handles_partial_detail_failure passed!")
@@ -280,6 +278,7 @@ async def test_process_detail_results_handles_exception_input(hass: HomeAssistan
     coordinator = ScrutinyDataUpdateCoordinator(
         hass=hass,
         logger=LOGGER,
+        config_entry=None,
         name="test",
         api_client=mock_api_client,
         update_interval=timedelta(seconds=30),
@@ -294,9 +293,9 @@ async def test_process_detail_results_handles_exception_input(hass: HomeAssistan
     coordinator._process_detail_results(wwn_key, exception_input, target_data_dict)
 
     # Check if the detail keys were populated with empty dictionaries
-    assert target_data_dict[KEY_DETAILS_DEVICE] == {}
     assert target_data_dict[KEY_DETAILS_SMART_LATEST] == {}
     assert target_data_dict[KEY_DETAILS_METADATA] == {}
+    assert "details_device" not in target_data_dict
     # Optional: Check if a warning was logged (requires mocking the logger)
 
 
@@ -307,6 +306,7 @@ async def test_process_detail_results_handles_valid_input(hass: HomeAssistant):
     coordinator = ScrutinyDataUpdateCoordinator(
         hass=hass,
         logger=LOGGER,
+        config_entry=None,
         name="test",
         api_client=mock_api_client,
         update_interval=timedelta(seconds=30),
@@ -318,10 +318,6 @@ async def test_process_detail_results_handles_valid_input(hass: HomeAssistant):
 
     coordinator._process_detail_results(wwn_key, valid_input, target_data_dict)
 
-    assert (
-        target_data_dict[KEY_DETAILS_DEVICE]
-        == MOCK_API_DETAILS_DATA_WWN1["data"][ATTR_DEVICE]
-    )
     assert (
         target_data_dict[KEY_DETAILS_SMART_LATEST]
         == MOCK_API_DETAILS_DATA_WWN1["data"][ATTR_SMART_RESULTS][0]
@@ -372,12 +368,12 @@ async def test_coordinator_handles_invalid_summary_type(hass: HomeAssistant):
     # It contains the message of the ScrutinyApiError, which was the ScrutinyApiResponseError.
     # The original ScrutinyApiResponseError had the message "Summary data from API was not a dictionary."
     # The ScrutinyApiError block turns this into:
-    # f"API error during Scrutiny data update cycle: {err!s}"
+    # f"API error during data update: {err!s}"
     # where err!s is then "Summary data from API was not a dictionary.".
 
     # Expected message in last_exception.args[0] or str(coordinator.last_exception)
     expected_msg_part_from_api_error = "Summary data from API was not a dictionary."
-    expected_wrapper_msg = "API error during Scrutiny data update cycle"
+    expected_wrapper_msg = "API error during data update"
 
     assert expected_wrapper_msg in str(coordinator.last_exception)
     assert expected_msg_part_from_api_error in str(coordinator.last_exception)
@@ -410,6 +406,7 @@ def _get_dummy_coordinator_for_method_test(
     return ScrutinyDataUpdateCoordinator(
         hass=hass,
         logger=LOGGER,  # Or a MagicMock() for the logger to check log output
+        config_entry=None,
         name="test_process_details",
         api_client=mock_api_client,
         update_interval=timedelta(seconds=30),
@@ -432,7 +429,6 @@ def test_process_detail_results_with_valid_data(hass: HomeAssistant):
 
     coordinator._process_detail_results(wwn_key, valid_input, target_data_dict)
 
-    assert target_data_dict[KEY_DETAILS_DEVICE] == valid_input["data"][ATTR_DEVICE]
     assert (
         target_data_dict[KEY_DETAILS_SMART_LATEST]
         == valid_input["data"][ATTR_SMART_RESULTS][0]
@@ -454,7 +450,6 @@ def test_process_detail_results_with_exception_input(hass: HomeAssistant, caplog
 
     coordinator._process_detail_results(wwn_key, exception_input, target_data_dict)
 
-    assert target_data_dict[KEY_DETAILS_DEVICE] == {}
     assert target_data_dict[KEY_DETAILS_SMART_LATEST] == {}
     assert target_data_dict[KEY_DETAILS_METADATA] == {}
     # Optional: Check the log output
@@ -479,7 +474,6 @@ def test_process_detail_results_missing_data_key_in_payload(hass: HomeAssistant)
     coordinator._process_detail_results(wwn_key, faulty_input, target_data_dict)
 
     # Expects empty dicts because 'data' is missing to extract 'device' and 'smart_results'
-    assert target_data_dict[KEY_DETAILS_DEVICE] == {}
     assert target_data_dict[KEY_DETAILS_SMART_LATEST] == {}
     # Metadata is at the top level and should still be extracted
     assert target_data_dict[KEY_DETAILS_METADATA] == faulty_input[ATTR_METADATA]
@@ -504,7 +498,6 @@ def test_process_detail_results_missing_smart_results_in_data(hass: HomeAssistan
 
     coordinator._process_detail_results(wwn_key, faulty_input, target_data_dict)
 
-    assert target_data_dict[KEY_DETAILS_DEVICE] == faulty_input["data"][ATTR_DEVICE]
     assert target_data_dict[KEY_DETAILS_SMART_LATEST] == {}  # Should be empty
     assert target_data_dict[KEY_DETAILS_METADATA] == faulty_input[ATTR_METADATA]
     print(
@@ -528,7 +521,6 @@ def test_process_detail_results_empty_smart_results_list(hass: HomeAssistant):
 
     coordinator._process_detail_results(wwn_key, faulty_input, target_data_dict)
 
-    assert target_data_dict[KEY_DETAILS_DEVICE] == faulty_input["data"][ATTR_DEVICE]
     assert target_data_dict[KEY_DETAILS_SMART_LATEST] == {}  # Should be empty
     assert target_data_dict[KEY_DETAILS_METADATA] == faulty_input[ATTR_METADATA]
     print(
@@ -554,7 +546,6 @@ def test_process_detail_results_missing_metadata_key_in_payload(hass: HomeAssist
 
     coordinator._process_detail_results(wwn_key, faulty_input, target_data_dict)
 
-    assert target_data_dict[KEY_DETAILS_DEVICE] == faulty_input["data"][ATTR_DEVICE]
     assert (
         target_data_dict[KEY_DETAILS_SMART_LATEST]
         == faulty_input["data"][ATTR_SMART_RESULTS][0]
@@ -563,3 +554,97 @@ def test_process_detail_results_missing_metadata_key_in_payload(hass: HomeAssist
     print(
         f"SUCCESS: {test_process_detail_results_missing_metadata_key_in_payload.__name__} passed!"
     )
+
+
+# --- Tests for archived disk filtering and stale device cleanup ---
+
+@pytest.mark.asyncio
+async def test_coordinator_filters_archived_disks_when_disabled(hass: HomeAssistant):
+    """Archived disks are excluded when show_archived=False."""
+    from pytest_homeassistant_custom_component.common import MockConfigEntry
+    from custom_components.scrutiny.const import CONF_SHOW_ARCHIVED, CONF_URL, CONF_VERIFY_SSL
+
+    summary_with_archived = {
+        "wwn1": {
+            ATTR_DEVICE: {"device_name": "/dev/sda", "model_name": "Active", "archived": False},
+            ATTR_SMART: {"temp": 30},
+        },
+        "wwn_archived": {
+            ATTR_DEVICE: {"device_name": "/dev/sdb", "model_name": "OldDisk", "archived": True},
+            ATTR_SMART: {"temp": 25},
+        },
+    }
+
+    mock_entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={CONF_URL: "http://localhost:8080", CONF_VERIFY_SSL: True},
+        options={CONF_SHOW_ARCHIVED: False},
+    )
+    mock_entry.add_to_hass(hass)
+
+    mock_api_client = AsyncMock(spec=ScrutinyApiClient)
+    mock_api_client.async_get_summary = AsyncMock(return_value=summary_with_archived)
+    mock_api_client.async_get_device_details = AsyncMock(return_value={
+        "data": {ATTR_SMART_RESULTS: []}, ATTR_METADATA: {}
+    })
+
+    coordinator = ScrutinyDataUpdateCoordinator(
+        hass=hass,
+        logger=LOGGER,
+        config_entry=mock_entry,
+        name="test-archived",
+        api_client=mock_api_client,
+        update_interval=timedelta(seconds=30),
+    )
+
+    data = await coordinator._async_update_data()
+
+    assert "wwn1" in data
+    assert "wwn_archived" not in data
+    print("SUCCESS: test_coordinator_filters_archived_disks_when_disabled passed!")
+
+
+@pytest.mark.asyncio
+async def test_coordinator_includes_archived_disks_when_enabled(hass: HomeAssistant):
+    """Archived disks are included when show_archived=True."""
+    from pytest_homeassistant_custom_component.common import MockConfigEntry
+    from custom_components.scrutiny.const import CONF_SHOW_ARCHIVED, CONF_URL, CONF_VERIFY_SSL
+
+    summary_with_archived = {
+        "wwn1": {
+            ATTR_DEVICE: {"device_name": "/dev/sda", "model_name": "Active", "archived": False},
+            ATTR_SMART: {"temp": 30},
+        },
+        "wwn_archived": {
+            ATTR_DEVICE: {"device_name": "/dev/sdb", "model_name": "OldDisk", "archived": True},
+            ATTR_SMART: {"temp": 25},
+        },
+    }
+
+    mock_entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={CONF_URL: "http://localhost:8080", CONF_VERIFY_SSL: True},
+        options={CONF_SHOW_ARCHIVED: True},
+    )
+    mock_entry.add_to_hass(hass)
+
+    mock_api_client = AsyncMock(spec=ScrutinyApiClient)
+    mock_api_client.async_get_summary = AsyncMock(return_value=summary_with_archived)
+    mock_api_client.async_get_device_details = AsyncMock(return_value={
+        "data": {ATTR_SMART_RESULTS: []}, ATTR_METADATA: {}
+    })
+
+    coordinator = ScrutinyDataUpdateCoordinator(
+        hass=hass,
+        logger=LOGGER,
+        config_entry=mock_entry,
+        name="test-archived-enabled",
+        api_client=mock_api_client,
+        update_interval=timedelta(seconds=30),
+    )
+
+    data = await coordinator._async_update_data()
+
+    assert "wwn1" in data
+    assert "wwn_archived" in data
+    print("SUCCESS: test_coordinator_includes_archived_disks_when_enabled passed!")

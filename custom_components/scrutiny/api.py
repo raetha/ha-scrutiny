@@ -5,39 +5,27 @@ from __future__ import annotations
 
 import asyncio
 import json
-from typing import Any, NoReturn  # NoReturn for functions that always raise
+from typing import Any, NoReturn
 
-import aiohttp  # For making asynchronous HTTP requests
+import aiohttp
 
-# Import logger from the integration's const module
 from .const import ATTR_METADATA, LOGGER
 
 
-# Custom exception classes for Scrutiny API interactions.
 class ScrutinyApiError(Exception):
-    """Generic base exception for Scrutiny API errors."""
+    """Base exception for Scrutiny API errors."""
 
 
 class ScrutinyApiConnectionError(ScrutinyApiError):
-    """
-    Exception raised for errors when connecting to the Scrutiny API.
-
-    This typically includes network issues like host not found,
-    connection refused, or timeouts.
-    """
+    """Raised when the Scrutiny server cannot be reached (timeout, refused, etc.)."""
 
 
 class ScrutinyApiAuthError(ScrutinyApiError):
-    """Exception raised for authentication errors with the Scrutiny API."""
+    """Raised on authentication failure (unexpected; Scrutiny is unauthenticated)."""
 
 
 class ScrutinyApiResponseError(ScrutinyApiError):
-    """
-    Exception raised for issues with the Scrutiny API's response.
-
-    This includes unexpected data formats, missing expected fields,
-    or if the API itself indicates an error (e.g., 'success: false').
-    """
+    """Raised when the Scrutiny API returns an unexpected or invalid response."""
 
 
 def _construct_api_exception_message(
@@ -103,21 +91,25 @@ def _raise_scrutiny_api_error(message: str, original_exception: Exception) -> No
 class ScrutinyApiClient:
     """Client to interact with the Scrutiny API."""
 
-    def __init__(self, host: str, port: int, session: aiohttp.ClientSession) -> None:
+    def __init__(
+        self,
+        base_url: str,
+        session: aiohttp.ClientSession,
+    ) -> None:
         """
         Initialize the API client.
 
         Args:
-            host: The hostname or IP address of the Scrutiny server.
-            port: The port number of the Scrutiny server.
+            base_url: The full base URL of the Scrutiny server,
+                e.g. ``http://scrutiny.local:8080``. The ``/api`` path is
+                appended automatically.
             session: An aiohttp.ClientSession instance for making requests.
+                Create with ``async_get_clientsession(hass, verify_ssl=...)``
+                to control SSL certificate verification.
 
         """
-        self._host = host
-        self._port = port
         self._session = session
-        # Construct the base URL for all API requests.
-        self._base_url = f"http://{self._host}:{self._port}/api"
+        self._base_url = f"{base_url.rstrip('/')}/api"
 
     async def _request(
         self, method: str, endpoint: str, **kwargs: Any
@@ -145,11 +137,10 @@ class ScrutinyApiClient:
 
         try:
             # Set a timeout for the request.
-            async with asyncio.timeout(10):
+            async with asyncio.timeout(15):
                 response = await self._session.request(
                     method,
                     url,
-                    ssl=False,  # Assuming Scrutiny runs on HTTP locally.
                     **kwargs,
                 )
                 # Raise an HTTPError for bad responses (4xx or 5xx).

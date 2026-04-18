@@ -1,6 +1,6 @@
 # tests/test_api.py
 
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import aiohttp
 import pytest
@@ -24,8 +24,7 @@ from custom_components.scrutiny.const import (
 # Define some constants for the tests
 # These values are not critical for mocking _request,
 # but the client needs them during initialization.
-TEST_HOST = "mockhost"
-TEST_PORT = 1234
+TEST_URL = "http://mockhost:1234"
 
 # These constants should be defined at the module level
 VALID_SUMMARY_RESPONSE = {
@@ -90,11 +89,11 @@ async def test_api_client_get_summary_success_mocking_request_method():
         return_value=mock_api_response,
     ) as mock_private_request:
         # Session is just a dummy here, as _request is mocked
-        async with aiohttp.ClientSession() as dummy_session:
-            client = ScrutinyApiClient(
-                host=TEST_HOST, port=TEST_PORT, session=dummy_session
-            )
-            summary_data = await client.async_get_summary()
+        mock_session = MagicMock(spec=aiohttp.ClientSession)
+        client = ScrutinyApiClient(
+            base_url=TEST_URL, session=mock_session
+        )
+        summary_data = await client.async_get_summary()
 
     # Check if _request was called correctly
     mock_private_request.assert_called_once_with("get", "summary")
@@ -130,11 +129,11 @@ async def test_api_client_get_device_details_success_mocking_request_method():
         "custom_components.scrutiny.api.ScrutinyApiClient._request",
         return_value=mock_api_response,
     ) as mock_private_request:
-        async with aiohttp.ClientSession() as dummy_session:
-            client = ScrutinyApiClient(
-                host=TEST_HOST, port=TEST_PORT, session=dummy_session
-            )
-            details_data = await client.async_get_device_details(wwn=test_wwn)
+        mock_session = MagicMock(spec=aiohttp.ClientSession)
+        client = ScrutinyApiClient(
+            base_url=TEST_URL, session=mock_session
+        )
+        details_data = await client.async_get_device_details(wwn=test_wwn)
 
     expected_endpoint = f"device/{test_wwn}/details"
     mock_private_request.assert_called_once_with("get", expected_endpoint)
@@ -163,21 +162,21 @@ async def test_api_client_get_summary_handles_connection_error():
             "Simulated ScrutinyApiConnectionError from _request mock"
         ),
     ) as mock_private_request:
-        async with aiohttp.ClientSession() as dummy_session:
-            client = ScrutinyApiClient(
-                host=TEST_HOST, port=TEST_PORT, session=dummy_session
-            )
+        mock_session = MagicMock(spec=aiohttp.ClientSession)
+        client = ScrutinyApiClient(
+            base_url=TEST_URL, session=mock_session
+        )
 
-            with pytest.raises(ScrutinyApiConnectionError) as excinfo:
-                await client.async_get_summary()
+        with pytest.raises(ScrutinyApiConnectionError) as excinfo:
+            await client.async_get_summary()
 
-            # Now the message should match the directly thrown exception
-            assert "Simulated ScrutinyApiConnectionError from _request mock" in str(
-                excinfo.value
-            )
-            # URL construction happens in the real _request, which we mock completely here,
-            # so the URL is not necessarily part of the mock's exception message.
-            # Wenn du das testen willst, müsste der Mock komplexer sein.
+        # Now the message should match the directly thrown exception
+        assert "Simulated ScrutinyApiConnectionError from _request mock" in str(
+            excinfo.value
+        )
+        # URL construction happens in the real _request, which we mock completely here,
+        # so the URL is not necessarily part of the mock's exception message.
+        # Wenn du das testen willst, müsste der Mock komplexer sein.
 
         mock_private_request.assert_called_once_with("get", "summary")
 
@@ -198,17 +197,17 @@ async def test_api_client_get_summary_handles_auth_error():
         new_callable=AsyncMock,
         side_effect=ScrutinyApiAuthError("Simulated 401 Auth Error from _request mock"),
     ) as mock_private_request:
-        async with aiohttp.ClientSession() as dummy_session:
-            client = ScrutinyApiClient(
-                host=TEST_HOST, port=TEST_PORT, session=dummy_session
-            )
+        mock_session = MagicMock(spec=aiohttp.ClientSession)
+        client = ScrutinyApiClient(
+            base_url=TEST_URL, session=mock_session
+        )
 
-            with pytest.raises(ScrutinyApiAuthError) as excinfo:
-                await client.async_get_summary()
+        with pytest.raises(ScrutinyApiAuthError) as excinfo:
+            await client.async_get_summary()
 
-            assert "Simulated 401 Auth Error" in str(excinfo.value)
-            # URL construction is less relevant here, as the error
-            # comes directly from the _request mock.
+        assert "Simulated 401 Auth Error" in str(excinfo.value)
+        # URL construction is less relevant here, as the error
+        # comes directly from the _request mock.
 
         mock_private_request.assert_called_once_with("get", "summary")
 
@@ -229,15 +228,15 @@ async def test_api_client_get_summary_handles_server_error():
             "Simulated 500 Server Error from _request mock"
         ),
     ) as mock_private_request:
-        async with aiohttp.ClientSession() as dummy_session:
-            client = ScrutinyApiClient(
-                host=TEST_HOST, port=TEST_PORT, session=dummy_session
-            )
+        mock_session = MagicMock(spec=aiohttp.ClientSession)
+        client = ScrutinyApiClient(
+            base_url=TEST_URL, session=mock_session
+        )
 
-            with pytest.raises(ScrutinyApiResponseError) as excinfo:
-                await client.async_get_summary()
+        with pytest.raises(ScrutinyApiResponseError) as excinfo:
+            await client.async_get_summary()
 
-            assert "Simulated 500 Server Error" in str(excinfo.value)
+        assert "Simulated 500 Server Error" in str(excinfo.value)
 
         mock_private_request.assert_called_once_with("get", "summary")
 
@@ -264,17 +263,17 @@ async def test_api_client_get_summary_handles_wrong_content_type():
         "custom_components.scrutiny.api.ScrutinyApiClient._request",
         return_value=mock_api_response,
     ) as mock_private_request:
-        async with aiohttp.ClientSession() as dummy_session:
-            client = ScrutinyApiClient(
-                host=TEST_HOST, port=TEST_PORT, session=dummy_session
-            )
+        mock_session = MagicMock(spec=aiohttp.ClientSession)
+        client = ScrutinyApiClient(
+            base_url=TEST_URL, session=mock_session
+        )
 
-            with pytest.raises(ScrutinyApiResponseError) as excinfo:
-                await client.async_get_summary()
+        with pytest.raises(ScrutinyApiResponseError) as excinfo:
+            await client.async_get_summary()
 
-            assert "Expected JSON from Scrutiny summary, got text/html" in str(
-                excinfo.value
-            )
+        assert "Expected JSON from Scrutiny summary, got text/html" in str(
+            excinfo.value
+        )
 
         mock_private_request.assert_called_once_with("get", "summary")
 
@@ -305,24 +304,24 @@ async def test_api_client_get_summary_handles_json_decode_error():
         "custom_components.scrutiny.api.ScrutinyApiClient._request",
         return_value=mock_api_response,
     ) as mock_private_request:
-        async with aiohttp.ClientSession() as dummy_session:
-            client = ScrutinyApiClient(
-                host=TEST_HOST, port=TEST_PORT, session=dummy_session
-            )
+        mock_session = MagicMock(spec=aiohttp.ClientSession)
+        client = ScrutinyApiClient(
+            base_url=TEST_URL, session=mock_session
+        )
 
-            with pytest.raises(ScrutinyApiResponseError) as excinfo:
-                await client.async_get_summary()
+        with pytest.raises(ScrutinyApiResponseError) as excinfo:
+            await client.async_get_summary()
 
-            # Check only the main message of ScrutinyApiResponseError
-            assert "Invalid JSON response received from Scrutiny summary" in str(
-                excinfo.value
-            )
-            # The original error message from JSONDecodeError is now part of the cause,
-            # not directly in the ScrutinyApiResponseError message.
+        # Check only the main message of ScrutinyApiResponseError
+        assert "Invalid JSON response received from Scrutiny summary" in str(
+            excinfo.value
+        )
+        # The original error message from JSONDecodeError is now part of the cause,
+        # not directly in the ScrutinyApiResponseError message.
 
-            # Optional: Überprüfe die Ursache, wenn du das möchtest
-            assert isinstance(excinfo.value.__cause__, json.JSONDecodeError)
-            assert "Simulated decode error" in str(excinfo.value.__cause__)
+        # Optional: Überprüfe die Ursache, wenn du das möchtest
+        assert isinstance(excinfo.value.__cause__, json.JSONDecodeError)
+        assert "Simulated decode error" in str(excinfo.value.__cause__)
 
         mock_private_request.assert_called_once_with("get", "summary")
 
@@ -335,7 +334,7 @@ async def test_api_client_get_device_details_handles_connection_error():
     test_wwn = "wwn_for_conn_error_details_test"
     expected_endpoint = f"device/{test_wwn}/details"
     # The URL expected in the exception message from _construct_api_exception_message
-    expected_url_in_message = f"http://{TEST_HOST}:{TEST_PORT}/api/{expected_endpoint}"
+    expected_url_in_message = f"{TEST_URL}/api/{expected_endpoint}"
 
     # Simulate that _request throws a ScrutinyApiConnectionError
     # (because the real _request would convert an aiohttp.ClientConnectionError
@@ -350,18 +349,18 @@ async def test_api_client_get_device_details_handles_connection_error():
             f"Connection error with Scrutiny at {expected_url_in_message}: Simulated details connection error"
         ),
     ) as mock_private_request:
-        async with aiohttp.ClientSession() as dummy_session:
-            client = ScrutinyApiClient(
-                host=TEST_HOST, port=TEST_PORT, session=dummy_session
-            )
+        mock_session = MagicMock(spec=aiohttp.ClientSession)
+        client = ScrutinyApiClient(
+            base_url=TEST_URL, session=mock_session
+        )
 
-            with pytest.raises(ScrutinyApiConnectionError) as excinfo:
-                await client.async_get_device_details(wwn=test_wwn)
+        with pytest.raises(ScrutinyApiConnectionError) as excinfo:
+            await client.async_get_device_details(wwn=test_wwn)
 
-            # Check the message of the raised exception
-            assert "Connection error with Scrutiny" in str(excinfo.value)
-            assert "Simulated details connection error" in str(excinfo.value)
-            assert expected_url_in_message in str(excinfo.value)
+        # Check the message of the raised exception
+        assert "Connection error with Scrutiny" in str(excinfo.value)
+        assert "Simulated details connection error" in str(excinfo.value)
+        assert expected_url_in_message in str(excinfo.value)
 
         # Ensure _request was called before the exception was thrown
         mock_private_request.assert_called_once_with("get", expected_endpoint)
@@ -384,17 +383,17 @@ async def test_api_client_get_device_details_handles_auth_error():
             f"Simulated 401 Auth Error for {expected_endpoint}"
         ),
     ) as mock_private_request:
-        async with aiohttp.ClientSession() as dummy_session:
-            client = ScrutinyApiClient(
-                host=TEST_HOST, port=TEST_PORT, session=dummy_session
-            )
+        mock_session = MagicMock(spec=aiohttp.ClientSession)
+        client = ScrutinyApiClient(
+            base_url=TEST_URL, session=mock_session
+        )
 
-            with pytest.raises(ScrutinyApiAuthError) as excinfo:
-                await client.async_get_device_details(wwn=test_wwn)
+        with pytest.raises(ScrutinyApiAuthError) as excinfo:
+            await client.async_get_device_details(wwn=test_wwn)
 
-            assert f"Simulated 401 Auth Error for {expected_endpoint}" in str(
-                excinfo.value
-            )
+        assert f"Simulated 401 Auth Error for {expected_endpoint}" in str(
+            excinfo.value
+        )
 
         mock_private_request.assert_called_once_with("get", expected_endpoint)
 
@@ -416,17 +415,17 @@ async def test_api_client_get_device_details_handles_server_error():
             f"Simulated 500 Server Error for {expected_endpoint}"
         ),
     ) as mock_private_request:
-        async with aiohttp.ClientSession() as dummy_session:
-            client = ScrutinyApiClient(
-                host=TEST_HOST, port=TEST_PORT, session=dummy_session
-            )
+        mock_session = MagicMock(spec=aiohttp.ClientSession)
+        client = ScrutinyApiClient(
+            base_url=TEST_URL, session=mock_session
+        )
 
-            with pytest.raises(ScrutinyApiResponseError) as excinfo:
-                await client.async_get_device_details(wwn=test_wwn)
+        with pytest.raises(ScrutinyApiResponseError) as excinfo:
+            await client.async_get_device_details(wwn=test_wwn)
 
-            assert f"Simulated 500 Server Error for {expected_endpoint}" in str(
-                excinfo.value
-            )
+        assert f"Simulated 500 Server Error for {expected_endpoint}" in str(
+            excinfo.value
+        )
 
         mock_private_request.assert_called_once_with("get", expected_endpoint)
 
@@ -455,18 +454,18 @@ async def test_api_client_get_device_details_handles_wrong_content_type():
         "custom_components.scrutiny.api.ScrutinyApiClient._request",
         return_value=mock_api_response,
     ) as mock_private_request:
-        async with aiohttp.ClientSession() as dummy_session:
-            client = ScrutinyApiClient(
-                host=TEST_HOST, port=TEST_PORT, session=dummy_session
-            )
+        mock_session = MagicMock(spec=aiohttp.ClientSession)
+        client = ScrutinyApiClient(
+            base_url=TEST_URL, session=mock_session
+        )
 
-            with pytest.raises(ScrutinyApiResponseError) as excinfo:
-                await client.async_get_device_details(wwn=test_wwn)
+        with pytest.raises(ScrutinyApiResponseError) as excinfo:
+            await client.async_get_device_details(wwn=test_wwn)
 
-            assert (
-                f"Expected JSON from Scrutiny device details (WWN: {test_wwn}), got text/plain"
-                in str(excinfo.value)
-            )
+        assert (
+            f"Expected JSON from Scrutiny device details (WWN: {test_wwn}), got text/plain"
+            in str(excinfo.value)
+        )
 
         mock_private_request.assert_called_once_with("get", expected_endpoint)
 
@@ -498,21 +497,21 @@ async def test_api_client_get_device_details_handles_json_decode_error():
         "custom_components.scrutiny.api.ScrutinyApiClient._request",
         return_value=mock_api_response,
     ) as mock_private_request:
-        async with aiohttp.ClientSession() as dummy_session:
-            client = ScrutinyApiClient(
-                host=TEST_HOST, port=TEST_PORT, session=dummy_session
-            )
+        mock_session = MagicMock(spec=aiohttp.ClientSession)
+        client = ScrutinyApiClient(
+            base_url=TEST_URL, session=mock_session
+        )
 
-            with pytest.raises(ScrutinyApiResponseError) as excinfo:
-                await client.async_get_device_details(wwn=test_wwn)
+        with pytest.raises(ScrutinyApiResponseError) as excinfo:
+            await client.async_get_device_details(wwn=test_wwn)
 
-            assert (
-                f"Invalid JSON response received from Scrutiny device details (WWN: {test_wwn})"
-                in str(excinfo.value)
-            )
-            # Check the cause if you need the original error message
-            assert isinstance(excinfo.value.__cause__, json.JSONDecodeError)
-            assert "Simulated details decode error" in str(excinfo.value.__cause__)
+        assert (
+            f"Invalid JSON response received from Scrutiny device details (WWN: {test_wwn})"
+            in str(excinfo.value)
+        )
+        # Check the cause if you need the original error message
+        assert isinstance(excinfo.value.__cause__, json.JSONDecodeError)
+        assert "Simulated details decode error" in str(excinfo.value.__cause__)
 
         mock_private_request.assert_called_once_with("get", expected_endpoint)
 
@@ -548,19 +547,19 @@ async def test_api_client_get_device_details_handles_success_false():
         "custom_components.scrutiny.api.ScrutinyApiClient._request",
         return_value=mock_api_response,
     ) as mock_private_request:
-        async with aiohttp.ClientSession() as dummy_session:
-            client = ScrutinyApiClient(
-                host=TEST_HOST, port=TEST_PORT, session=dummy_session
-            )
+        mock_session = MagicMock(spec=aiohttp.ClientSession)
+        client = ScrutinyApiClient(
+            base_url=TEST_URL, session=mock_session
+        )
 
-            with pytest.raises(ScrutinyApiResponseError) as excinfo:
-                await client.async_get_device_details(wwn=test_wwn)
+        with pytest.raises(ScrutinyApiResponseError) as excinfo:
+            await client.async_get_device_details(wwn=test_wwn)
 
-            assert (
-                "Scrutiny API device details call not successful or unexpected format"
-                in str(excinfo.value)
-            )
-            assert f"(WWN: {test_wwn})" in str(excinfo.value)
+        assert (
+            "Scrutiny API device details call not successful or unexpected format"
+            in str(excinfo.value)
+        )
+        assert f"(WWN: {test_wwn})" in str(excinfo.value)
 
         mock_private_request.assert_called_once_with("get", expected_endpoint)
 
@@ -592,16 +591,16 @@ async def test_api_client_get_device_details_handles_missing_data_key():
         "custom_components.scrutiny.api.ScrutinyApiClient._request",
         return_value=mock_api_response,
     ) as mock_private_request:
-        async with aiohttp.ClientSession() as dummy_session:
-            client = ScrutinyApiClient(
-                host=TEST_HOST, port=TEST_PORT, session=dummy_session
-            )
+        mock_session = MagicMock(spec=aiohttp.ClientSession)
+        client = ScrutinyApiClient(
+            base_url=TEST_URL, session=mock_session
+        )
 
-            with pytest.raises(ScrutinyApiResponseError) as excinfo:
-                await client.async_get_device_details(wwn=test_wwn)
+        with pytest.raises(ScrutinyApiResponseError) as excinfo:
+            await client.async_get_device_details(wwn=test_wwn)
 
-            assert "response is missing 'data' or 'metadata' key" in str(excinfo.value)
-            assert f"(WWN: {test_wwn})" in str(excinfo.value)
+        assert "response is missing 'data' or 'metadata' key" in str(excinfo.value)
+        assert f"(WWN: {test_wwn})" in str(excinfo.value)
 
         mock_private_request.assert_called_once_with("get", expected_endpoint)
 
