@@ -117,9 +117,7 @@
             "last_smart_update": {
                 "name": "Last SMART Update"
             },
-            "smart_attribute_raw": {
-                "name": "Raw Value"
-            }
+            "smart_attribute_raw": {}
         }
     }
 }

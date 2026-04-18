@@ -665,8 +665,8 @@ class ScrutinySmartRawValueSensor(
         self.entity_description = SensorEntityDescription(
             key=f"smart_raw_{slugify(attribute_id_str)}",
             name=f"{attr_label} (Raw)",
-            translation_key="smart_attribute_raw",
         )
+        self._attr_icon = "mdi:counter"
 
         self._attr_unique_id = (
             f"{DOMAIN}_{self._wwn}_smart_raw_"
