@@ -84,3 +84,29 @@ download, `entity_registry_enabled_default` via opt-in creation rather than
 disable-by-default. The `quality_scale` field in `manifest.json` is set to `gold`,
 which is the maximum value the field accepts; Platinum is assessed separately by the HA
 core team for integrations submitted to core.
+
+## 1.0.1 — 2026-04-18
+
+### Bug fixes
+
+- **Raw value sensor names** — all raw value sensors were displaying "Raw Value" as
+  their name instead of the attribute name (e.g. "Reallocated Sectors Count (Raw)").
+  Caused by the `translation_key` on the sensor description overriding the
+  programmatically set name. Fixed by removing the translation key and setting the icon
+  directly via `_attr_icon`.
+
+### CI fixes
+
+- **Tests failing in CI with `ModuleNotFoundError`** — `pythonpath = .` added to
+  `pytest.ini` so pytest adds the repo root to `sys.path` in clean CI environments.
+  Also added `asyncio_default_fixture_loop_scope = function` to silence a
+  pytest-asyncio deprecation warning.
+
+- **Test teardown error in `test_config_flow_user_step_success`** — creating a config
+  entry in the flow triggered a real `async_setup_entry`, which attempted a network call,
+  crashed, and left a background retry thread running into teardown. Fixed by mocking
+  `async_setup_entry` in the two tests that reach `CREATE_ENTRY`.
+
+- **GitHub Actions Node.js 20 deprecation warnings** — updated `actions/checkout` from
+  `v4` to `v6` and `actions/setup-python` from `v5` to `v6` across all workflow files.
+  Both v6 releases run on Node.js 24.
