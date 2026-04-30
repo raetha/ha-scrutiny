@@ -91,7 +91,7 @@ rules:
     status: done
     comment: >
       After each successful poll returning at least one disk, the coordinator
-      removes HA device entries for WWNs no longer present in the API response.
+      removes HA device entries for disk identifiers no longer present in the API response.
       The guard (len > 0) prevents accidental wipeout on API failure.
       Users may also manually delete device entries via the UI.
 
@@ -104,5 +104,5 @@ rules:
     status: done
     comment: >
       py.typed marker is present. All public functions and methods carry
-      complete type annotations. from __future__ import annotations is used
-      throughout for forward-reference compatibility.
+      complete type annotations. Python 3.14 is the minimum target, so lazy
+      annotation evaluation is the default and no import shim is required.

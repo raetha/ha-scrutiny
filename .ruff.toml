@@ -1,5 +1,5 @@
 line-length = 88
-target-version = "py312"
+target-version = "py314"
 
 [lint]
 select = [
@@ -41,4 +41,13 @@ ignore = [
     "S101",   # assert is fine in tests
     "D",      # no docstring requirements in tests
     "ANN",    # no annotation requirements in tests
+    "E401",   # multi-import lines are intentional in test bootstrap headers
+    "E402",   # sys.path bootstrap must precede ha_stubs import — structurally unavoidable
+    "E501",   # long assertion messages and mock constructor calls are normal in tests
+    "E702",   # stubs.install() on same line as import is intentional for bootstrap ordering
+    "F401",   # imports inside lazy-import functions captured via locals() appear unused to ruff
+    "I001",   # import order cannot be fully sorted due to bootstrap requirements
 ]
+
+[format]
+exclude = ["tests/*"]

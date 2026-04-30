@@ -1,9 +1,7 @@
 """Sensor platform for the Scrutiny Home Assistant integration."""
 
-from __future__ import annotations
-
 from datetime import datetime
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from homeassistant.components.sensor import (
     SensorDeviceClass,
@@ -17,10 +15,13 @@ from homeassistant.const import (
     UnitOfTemperature,
     UnitOfTime,
 )
+from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceInfo
+from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.util import slugify
 
+from . import ScrutinyConfigEntry
 from .const import (
     ATTR_ARCHIVED,
     ATTR_ATTRIBUTE_ID,
@@ -69,12 +70,6 @@ from .const import (
     NAME as INTEGRATION_NAME,
 )
 from .coordinator import ScrutinyDataUpdateCoordinator
-
-if TYPE_CHECKING:
-    from homeassistant.core import HomeAssistant
-    from homeassistant.helpers.entity_platform import AddEntitiesCallback
-
-    from . import ScrutinyConfigEntry
 
 # Coordinator-based entities push updates themselves; no parallel fetching needed.
 PARALLEL_UPDATES = 0
@@ -172,7 +167,7 @@ async def async_setup_entry(
     entities_to_add: list[SensorEntity] = []
 
     # Iterate over each disk returned by the coordinator.
-    for wwn, aggregated_disk_data in coordinator.data.items():
+    for disk_id, aggregated_disk_data in coordinator.data.items():
         summary_device_data = aggregated_disk_data.get(KEY_SUMMARY_DEVICE, {})
         details_smart_latest = aggregated_disk_data.get(KEY_DETAILS_SMART_LATEST, {})
         details_metadata = aggregated_disk_data.get(KEY_DETAILS_METADATA, {})
@@ -183,20 +178,22 @@ async def async_setup_entry(
         # remain identifiable in the HA device list.
         serial_number = summary_device_data.get(ATTR_SERIAL_NUMBER)
         model_part = summary_device_data.get(ATTR_MODEL_NAME, "Disk")
-        id_part = serial_number or wwn[-6:]
+        id_part = serial_number or disk_id[-6:]
         device_info_name = f"{model_part} ({id_part})"
         if is_archived:
             device_info_name = f"{device_info_name} [Archived]"
 
         _base_url = entry.data.get(CONF_URL, "").rstrip("/")
         device_info = DeviceInfo(
-            identifiers={(DOMAIN, wwn)},
+            identifiers={(DOMAIN, disk_id)},
             name=device_info_name,
             model=summary_device_data.get(ATTR_MODEL_NAME),
             serial_number=serial_number,
             manufacturer=summary_device_data.get("manufacturer") or INTEGRATION_NAME,
             sw_version=summary_device_data.get(ATTR_FIRMWARE),
-            configuration_url=f"{_base_url}/web/device/{wwn}" if _base_url else None,
+            configuration_url=(
+                f"{_base_url}/web/device/{disk_id}" if _base_url else None
+            ),
             via_device=(
                 DOMAIN,
                 entry.entry_id,
@@ -209,7 +206,7 @@ async def async_setup_entry(
                 ScrutinyMainDiskSensor(
                     coordinator=coordinator,
                     entity_description=description,
-                    wwn=wwn,
+                    disk_id=disk_id,
                     device_info=device_info,
                     serial_number=serial_number,
                     is_archived=is_archived,
@@ -234,7 +231,7 @@ async def async_setup_entry(
                                 "unexpected data format %s"
                             ),
                             attr_id_str_key,
-                            wwn,
+                            disk_id,
                             type(attr_data_value),
                         )
                         continue
@@ -248,7 +245,7 @@ async def async_setup_entry(
                                 "SMART attribute for disk %s (key %s) "
                                 "is missing '%s'. Data: %s"
                             ),
-                            wwn,
+                            disk_id,
                             attr_id_str_key,
                             ATTR_ATTRIBUTE_ID,
                             attr_data_value,
@@ -268,7 +265,7 @@ async def async_setup_entry(
                     entities_to_add.append(
                         ScrutinySmartAttributeSensor(
                             coordinator=coordinator,
-                            wwn=wwn,
+                            disk_id=disk_id,
                             device_info=device_info,
                             attribute_id_str=actual_attribute_id_for_sensor,
                             attribute_metadata=attr_metadata,
@@ -285,7 +282,7 @@ async def async_setup_entry(
                         entities_to_add.append(
                             ScrutinySmartRawValueSensor(
                                 coordinator=coordinator,
-                                wwn=wwn,
+                                disk_id=disk_id,
                                 device_info=device_info,
                                 attribute_id_str=actual_attribute_id_for_sensor,
                                 attribute_metadata=attr_metadata,
@@ -299,7 +296,7 @@ async def async_setup_entry(
                         "SMART attributes data for disk %s is not a dict: "
                         "%s. Skipping SMART attribute sensors."
                     ),
-                    wwn,
+                    disk_id,
                     type(smart_attributes_data),
                 )
 
@@ -323,7 +320,7 @@ class ScrutinyMainDiskSensor(
         self,
         coordinator: ScrutinyDataUpdateCoordinator,
         entity_description: SensorEntityDescription,
-        wwn: str,
+        disk_id: str,
         device_info: DeviceInfo,
         serial_number: str | None = None,
         is_archived: bool = False,
@@ -331,11 +328,11 @@ class ScrutinyMainDiskSensor(
         """Initialize the main disk sensor."""
         super().__init__(coordinator)
         self.entity_description = entity_description
-        self._wwn = wwn
+        self._disk_id = disk_id
         self._serial_number = serial_number
         self._is_archived = is_archived
         self._attr_device_info = device_info
-        self._attr_unique_id = f"{DOMAIN}_{self._wwn}_{self.entity_description.key}"
+        self._attr_unique_id = f"{DOMAIN}_{self._disk_id}_{self.entity_description.key}"
         self._update_sensor_state()
 
     @property
@@ -344,8 +341,8 @@ class ScrutinyMainDiskSensor(
         return (
             super().available
             and self.coordinator.data is not None
-            and self._wwn in self.coordinator.data
-            and KEY_SUMMARY_DEVICE in self.coordinator.data[self._wwn]
+            and self._disk_id in self.coordinator.data
+            and KEY_SUMMARY_DEVICE in self.coordinator.data[self._disk_id]
         )
 
     def _update_sensor_state(self) -> None:
@@ -354,7 +351,7 @@ class ScrutinyMainDiskSensor(
             self._attr_native_value = None
             return
 
-        data = self.coordinator.data[self._wwn]
+        data = self.coordinator.data[self._disk_id]
         summary_device_data = data.get(KEY_SUMMARY_DEVICE, {})
         summary_smart_data = data.get(KEY_SUMMARY_SMART, {})
         details_smart_latest = data.get(KEY_DETAILS_SMART_LATEST, {})
@@ -427,10 +424,10 @@ class ScrutinyMainDiskSensor(
                     # Replace trailing Z with +00:00 for fromisoformat
                     ts_str = ts_str.replace("Z", "+00:00")
                     value = datetime.fromisoformat(ts_str)
-                except (ValueError, TypeError):
+                except (ValueError, TypeError):  # fmt: skip
                     LOGGER.debug(
                         "Could not parse UpdatedAt timestamp for %s: %r",
-                        self._wwn,
+                        self._disk_id,
                         raw_ts,
                     )
                     value = None
@@ -468,7 +465,7 @@ class ScrutinySmartAttributeSensor(
     def __init__(
         self,
         coordinator: ScrutinyDataUpdateCoordinator,
-        wwn: str,
+        disk_id: str,
         device_info: DeviceInfo,
         # String representation of the SMART attribute ID (e.g., "5", "194")
         attribute_id_str: str,
@@ -478,7 +475,7 @@ class ScrutinySmartAttributeSensor(
     ) -> None:
         """Initialize the SMART attribute sensor."""
         super().__init__(coordinator)
-        self._wwn = wwn
+        self._disk_id = disk_id
         self._serial_number = serial_number
         self._is_archived = is_archived
         self._attribute_id_str = attribute_id_str
@@ -516,7 +513,7 @@ class ScrutinySmartAttributeSensor(
             self.attribute_name_for_entity_description
         )
         self._attr_unique_id = (
-            f"{DOMAIN}_{self._wwn}_smart_"
+            f"{DOMAIN}_{self._disk_id}_smart_"
             f"{slugify(self._attribute_id_str)}_{slugified_display_name_for_id}"
         )
 
@@ -528,12 +525,12 @@ class ScrutinySmartAttributeSensor(
         if not (
             super().available
             and self.coordinator.data is not None
-            and self._wwn in self.coordinator.data
+            and self._disk_id in self.coordinator.data
         ):
             return False
 
         # Check if the detailed SMART data and specific attribute exist.
-        disk_agg_data = self.coordinator.data[self._wwn]
+        disk_agg_data = self.coordinator.data[self._disk_id]
         latest_smart = disk_agg_data.get(KEY_DETAILS_SMART_LATEST)
         if not isinstance(latest_smart, dict):
             return False
@@ -558,7 +555,7 @@ class ScrutinySmartAttributeSensor(
         """  # noqa: D205
         if not self.available:
             return None
-        return self.coordinator.data[self._wwn][KEY_DETAILS_SMART_LATEST][
+        return self.coordinator.data[self._disk_id][KEY_DETAILS_SMART_LATEST][
             ATTR_SMART_ATTRS
         ].get(self._attribute_id_str)
 
@@ -579,7 +576,7 @@ class ScrutinySmartAttributeSensor(
             else ATTR_SMART_STATUS_UNKNOWN
         )
 
-        summary_device_data = self.coordinator.data.get(self._wwn, {}).get(
+        summary_device_data = self.coordinator.data.get(self._disk_id, {}).get(
             KEY_SUMMARY_DEVICE, {}
         )
         # when_failed is typically "-" (meaning never failed); only include it when
@@ -638,7 +635,7 @@ class ScrutinySmartRawValueSensor(
     def __init__(
         self,
         coordinator: ScrutinyDataUpdateCoordinator,
-        wwn: str,
+        disk_id: str,
         device_info: DeviceInfo,
         attribute_id_str: str,
         attribute_metadata: dict[str, Any],
@@ -647,7 +644,7 @@ class ScrutinySmartRawValueSensor(
     ) -> None:
         """Initialize the raw value sensor."""
         super().__init__(coordinator)
-        self._wwn = wwn
+        self._disk_id = disk_id
         self._serial_number = serial_number
         self._is_archived = is_archived
         self._attribute_id_str = attribute_id_str
@@ -669,7 +666,7 @@ class ScrutinySmartRawValueSensor(
         self._attr_icon = "mdi:counter"
 
         self._attr_unique_id = (
-            f"{DOMAIN}_{self._wwn}_smart_raw_"
+            f"{DOMAIN}_{self._disk_id}_smart_raw_"
             f"{slugify(attribute_id_str)}_{slugify(attr_label)}"
         )
         self._update_state()
@@ -680,10 +677,10 @@ class ScrutinySmartRawValueSensor(
         if not (
             super().available
             and self.coordinator.data is not None
-            and self._wwn in self.coordinator.data
+            and self._disk_id in self.coordinator.data
         ):
             return False
-        disk_data = self.coordinator.data[self._wwn]
+        disk_data = self.coordinator.data[self._disk_id]
         latest = disk_data.get(KEY_DETAILS_SMART_LATEST)
         if not isinstance(latest, dict):
             return False
@@ -699,7 +696,7 @@ class ScrutinySmartRawValueSensor(
             self._attr_extra_state_attributes = {}
             return
 
-        attr_data = self.coordinator.data[self._wwn][KEY_DETAILS_SMART_LATEST][
+        attr_data = self.coordinator.data[self._disk_id][KEY_DETAILS_SMART_LATEST][
             ATTR_SMART_ATTRS
         ].get(self._attribute_id_str, {})
 
@@ -707,7 +704,7 @@ class ScrutinySmartRawValueSensor(
         # Raw values from Scrutiny are typically integers; coerce for safety.
         try:
             self._attr_native_value = int(raw) if raw is not None else None
-        except (TypeError, ValueError):
+        except (TypeError, ValueError):  # fmt: skip
             self._attr_native_value = None
 
         extra: dict[str, Any] = {

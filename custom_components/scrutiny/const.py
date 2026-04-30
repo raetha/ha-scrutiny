@@ -1,7 +1,5 @@
 """Constants for the Scrutiny Home Assistant integration."""
 
-from __future__ import annotations
-
 from logging import Logger, getLogger
 
 # Logger instance for the integration.
@@ -12,7 +10,7 @@ DOMAIN: str = "scrutiny"
 # User-visible name of the integration. Also used as default manufacturer for devices.
 NAME: str = "Scrutiny"
 # Version of the integration.
-VERSION: str = "1.0.1"
+VERSION: str = "1.1.0"
 
 # Configuration keys used in config_flow.py and __init__.py.
 CONF_URL: str = "url"  # Full base URL of the Scrutiny server, e.g. http://host:8080
@@ -39,8 +37,8 @@ DEFAULT_VERIFY_SSL: bool = True  # Verify SSL certificates by default.
 # --- Keys for navigating the aggregated data structure in the coordinator ---
 # These keys are used internally by the coordinator to structure the data fetched
 # from the Scrutiny API and by sensor.py to access specific parts of this data.
-# For example, coordinator.data[wwn][KEY_SUMMARY_DEVICE] would access
-# the device summary for a disk with a given WWN.
+# For example, coordinator.data[disk_id][KEY_SUMMARY_DEVICE] would access
+# the device summary for a disk with a given Scrutiny UUID.
 
 # Key for the 'device' part of the summary data for a disk.
 KEY_SUMMARY_DEVICE: str = "summary_device"
@@ -58,9 +56,11 @@ KEY_DETAILS_METADATA: str = "details_smart_attributes_metadata"
 
 # Keys for general disk information
 #  (often present in both summary and details API responses).
-# ATTR_WWN is the World Wide Name, used as the primary identifier for disks.
-# It's also a field within the device object from the API.
-ATTR_WWN: str = "wwn"  # World Wide Name of the disk.
+# ATTR_WWN is the JSON field name for the World Wide Name within the device
+# data payload returned by the API. WWN is still present as a field in 0.9.x
+# but is no longer used as the primary disk routing key — Scrutiny 0.9.0+
+# uses a UUIDv5 (scrutiny_uuid) as the top-level summary key and API route.
+ATTR_WWN: str = "wwn"  # World Wide Name field within the device payload.
 ATTR_DEVICE_NAME: str = "device_name"  # e.g., /dev/sda
 ATTR_MODEL_NAME: str = "model_name"  # e.g., "Samsung SSD 860 EVO"
 ATTR_FIRMWARE: str = "firmware"  # Firmware version of the disk.
@@ -83,7 +83,7 @@ ATTR_POWER_CYCLE_COUNT: str = (
     "power_cycle_count"  # Number of power cycles. (From details_smart_latest)
 )
 
-# Keys related to the structure of the '/api/device/{wwn}/details' API response.
+# Keys related to the '/api/device/{scrutiny_uuid}/details' API response structure.
 ATTR_DEVICE: str = "device"  # The 'device' object within the details payload.
 ATTR_SMART_RESULTS: str = (
     "smart_results"  # Array of SMART snapshots in the details payload.

@@ -5,14 +5,12 @@ Polls a Scrutiny API endpoint to retrieve disk health information and
 exposes it as diagnostic sensor entities in Home Assistant.
 """
 
-from __future__ import annotations
-
 import logging
 from datetime import timedelta
-from typing import TYPE_CHECKING
 from urllib.parse import urlparse
 
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.device_registry import DeviceEntryType
@@ -30,9 +28,6 @@ from .const import (
     VERSION,
 )
 from .coordinator import ScrutinyDataUpdateCoordinator
-
-if TYPE_CHECKING:
-    from homeassistant.core import HomeAssistant
 
 # Typed alias so platforms can annotate their config entry argument precisely.
 type ScrutinyConfigEntry = ConfigEntry[ScrutinyDataUpdateCoordinator]
@@ -108,7 +103,7 @@ async def async_remove_config_entry_device(
     Allow users to remove a disk device from the UI.
 
     Returns True so HA removes the device from the registry.  The coordinator
-    will naturally stop creating entities for this WWN on the next refresh, so
-    no additional cleanup is required here.
+    will naturally stop creating entities for this disk on the next refresh,
+    so no additional cleanup is required here.
     """
     return True

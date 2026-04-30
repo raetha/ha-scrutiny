@@ -1,8 +1,6 @@
 # api.py
 """API client for interacting with a Scrutiny web server."""
 
-from __future__ import annotations
-
 import asyncio
 import json
 from typing import Any, NoReturn
@@ -119,7 +117,7 @@ class ScrutinyApiClient:
 
         Args:
             method: The HTTP method (e.g., "get", "post").
-            endpoint: The API endpoint path (e.g., "summary", "device/wwn/details").
+            endpoint: The API endpoint path (e.g., "summary", "device/{uuid}/details").
             **kwargs: Additional arguments to pass to the aiohttp.ClientSession.request
             method.
 
@@ -272,11 +270,15 @@ class ScrutinyApiClient:
 
         return summary_data
 
-    async def async_get_device_details(self, wwn: str) -> dict[str, Any]:
-        """Fetch detailed information for a specific disk."""
-        endpoint = f"device/{wwn}/details"
-        response_obj: aiohttp.ClientResponse | None = None  # Renamed
-        LOGGER.debug("Requesting Scrutiny device details for WWN: %s", wwn)
+    async def async_get_device_details(self, disk_id: str) -> dict[str, Any]:
+        """Fetch detailed information for a specific disk by its Scrutiny identifier.
+
+        On Scrutiny ≥ 0.9.0 *disk_id* is a UUIDv5; on older releases it is the
+        WWN hex string. The integration treats it as an opaque key in both cases.
+        """
+        endpoint = f"device/{disk_id}/details"
+        response_obj: aiohttp.ClientResponse | None = None
+        LOGGER.debug("Requesting Scrutiny device details for disk: %s", disk_id)
 
         try:
             response_obj = await self._request("get", endpoint)
@@ -285,7 +287,7 @@ class ScrutinyApiClient:
             if "application/json" not in content_type:
                 msg = (
                     "Expected JSON from Scrutiny "
-                    f"device details (WWN: {wwn}), got {content_type}"
+                    f"device details (disk: {disk_id}), got {content_type}"
                 )
                 _raise_scrutiny_api_response_error(msg)
 
@@ -294,7 +296,7 @@ class ScrutinyApiClient:
         except json.JSONDecodeError as exc:
             msg = (
                 "Invalid JSON response received from "
-                f"Scrutiny device details (WWN: {wwn})"
+                f"Scrutiny device details (disk: {disk_id})"
             )
             _raise_scrutiny_api_response_error(msg, exc)
 
@@ -306,15 +308,18 @@ class ScrutinyApiClient:
             raise
         except Exception as exc:  # noqa: BLE001
             LOGGER.exception(
-                "Unexpected error processing Scrutiny device details (WWN: %s)", wwn
+                "Unexpected error processing Scrutiny device details (disk: %s)",
+                disk_id,
             )
-            msg = f"Unexpected error processing Scrutiny device details (WWN: {wwn})"
+            msg = (
+                f"Unexpected error processing Scrutiny device details (disk: {disk_id})"
+            )
             _raise_scrutiny_api_error(msg, exc)
 
         # Process the successfully parsed JSON data.
         LOGGER.debug(
-            "Scrutiny API device details FULL response for WWN %s: %s",
-            wwn,
+            "Scrutiny API device details FULL response for disk %s: %s",
+            disk_id,
             str(full_api_response_data)[:2000],
         )
 
@@ -323,7 +328,7 @@ class ScrutinyApiClient:
         ) or not full_api_response_data.get("success"):
             err_msg = (
                 "Scrutiny API device details call not successful or unexpected format "
-                f"(WWN: {wwn}): {str(full_api_response_data)[:200]}"
+                f"(disk: {disk_id}): {str(full_api_response_data)[:200]}"
             )
             _raise_scrutiny_api_response_error(err_msg)
 
@@ -334,7 +339,8 @@ class ScrutinyApiClient:
             err_msg = (
                 "Scrutiny API device details "
                 "response is missing 'data' or 'metadata' key "
-                f"(WWN: {wwn}): Keys present: {list(full_api_response_data.keys())}"
+                f"(disk: {disk_id}): "
+                f"Keys present: {list(full_api_response_data.keys())}"
             )
             LOGGER.error(err_msg)
             _raise_scrutiny_api_response_error(err_msg)

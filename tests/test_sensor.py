@@ -1,97 +1,93 @@
-# tests/test_sensor.py
+"""Tests for the sensor platform (sensor.py).
 
-import pytest
-from unittest.mock import patch, AsyncMock, MagicMock, call  # call für multiple calls
+Covers: async_setup_entry entity creation counts, ScrutinyMainDiskSensor
+state calculation for all main sensor keys, ScrutinySmartAttributeSensor
+availability, state updates, name fallback, and ScrutinySmartRawValueSensor.
+Uses ha_stubs — no HA installation required.
+"""
 
-from typing import TYPE_CHECKING, Any
-
+import asyncio
 import copy
+import os
+import sys
+import unittest
+from datetime import UTC, datetime
+from unittest.mock import MagicMock
 
-from homeassistant.core import HomeAssistant
-from homeassistant.helpers.entity_platform import (
-    AddEntitiesCallback,
-)  # Type for async_add_entities
-from homeassistant.helpers.update_coordinator import (
-    DataUpdateCoordinator,
-)  # For typing the mock
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+TESTS = os.path.join(ROOT, "tests")
+sys.path.insert(0, ROOT)
+sys.path.insert(0, TESTS)
 
-from homeassistant.components.sensor import SensorEntityDescription  # Für Typing
-from homeassistant.helpers.device_registry import DeviceInfo  # Für Typing
-from homeassistant.util import slugify
+import ha_stubs as stubs
 
-# Importiere die zu testende Funktion und die Sensorklassen
+stubs.install()
+
+from ha_stubs import ConfigEntry, DeviceInfo, HomeAssistant, reset_registry
+
+from custom_components.scrutiny.const import (
+    ATTR_ARCHIVED,
+    ATTR_ATTRIBUTE_ID,
+    ATTR_CAPACITY,
+    ATTR_DEVICE_NAME,
+    ATTR_DISPLAY_NAME,
+    ATTR_FIRMWARE,
+    ATTR_MODEL_NAME,
+    ATTR_POWER_CYCLE_COUNT,
+    ATTR_POWER_ON_HOURS,
+    ATTR_RAW_STRING,
+    ATTR_RAW_VALUE,
+    ATTR_SERIAL_NUMBER,
+    ATTR_SMART_ATTRIBUTE_STATUS_CODE,
+    ATTR_SMART_ATTRS,
+    ATTR_SMART_OVERALL_STATUS,
+    ATTR_SMART_STATUS_MAP,
+    ATTR_SUMMARY_DEVICE_STATUS,
+    ATTR_TEMPERATURE,
+    ATTR_UPDATED_AT,
+    ATTR_WHEN_FAILED,
+    CONF_URL,
+    DOMAIN,
+    KEY_DETAILS_METADATA,
+    KEY_DETAILS_SMART_LATEST,
+    KEY_SUMMARY_DEVICE,
+    KEY_SUMMARY_SMART,
+    SCRUTINY_DEVICE_SUMMARY_STATUS_MAP,
+    SCRUTINY_DEVICE_SUMMARY_STATUS_UNKNOWN,
+)
+from custom_components.scrutiny.coordinator import ScrutinyDataUpdateCoordinator
 from custom_components.scrutiny.sensor import (
-    async_setup_entry,
+    MAIN_DISK_SENSOR_DESCRIPTIONS,
     ScrutinyMainDiskSensor,
     ScrutinySmartAttributeSensor,
-    MAIN_DISK_SENSOR_DESCRIPTIONS,
+    ScrutinySmartRawValueSensor,
+    async_setup_entry,
 )
 
-# Import constants needed for test data and assertions
-from custom_components.scrutiny.const import (
-    DOMAIN,
-    ATTR_DEVICE_NAME,
-    ATTR_MODEL_NAME,
-    ATTR_FIRMWARE,
-    ATTR_SERIAL_NUMBER,
-    ATTR_TEMPERATURE,
-    ATTR_POWER_ON_HOURS,
-    ATTR_SUMMARY_DEVICE_STATUS,
-    ATTR_CAPACITY,
-    ATTR_POWER_CYCLE_COUNT,
-    ATTR_SMART_OVERALL_STATUS,
-    ATTR_SMART_ATTRS,
-    ATTR_ATTRIBUTE_ID,  # Key for the numeric attribute ID within SMART attribute data
-    ATTR_DISPLAY_NAME,
-    ATTR_UPDATED_AT,
-    KEY_SUMMARY_DEVICE,
-    KEY_SUMMARY_SMART,  # Wird ggf. von Sensoren als Fallback genutzt
-    KEY_DETAILS_SMART_LATEST,
-    KEY_DETAILS_METADATA,
-    ATTR_RAW_VALUE,
-    ATTR_NORMALIZED_VALUE,
-    ATTR_WORST,
-    ATTR_THRESH,
-    ATTR_WHEN_FAILED,
-    ATTR_SMART_ATTRIBUTE_STATUS_CODE,
-    ATTR_DESCRIPTION,
-    ATTR_IS_CRITICAL,
-    ATTR_IDEAL_VALUE_DIRECTION,
-    ATTR_SMART_STATUS_MAP,
-    ATTR_SMART_STATUS_UNKNOWN,
-)
+run = asyncio.run
 
-# Import the coordinator class for typing the mock
-from custom_components.scrutiny.coordinator import ScrutinyDataUpdateCoordinator
+# ---------------------------------------------------------------------------
+# Shared test data
+# ---------------------------------------------------------------------------
 
-# Helpers from pytest-homeassistant-custom-component
-from pytest_homeassistant_custom_component.common import MockConfigEntry
-
-# --- Test data for the coordinator ---
-# This structure simulates coordinator.data
-# We need at least one disk with some main attributes and some SMART attributes
-
-MOCK_WWN1 = "wwn_disk1_sensor_test"
-MOCK_WWN2 = "wwn_disk2_sensor_test"
-MOCK_SERIAL1 = "SN_DISK1_ABC123"
-MOCK_SERIAL2 = "SN_DISK2_XYZ789"
+DISK_ID_1 = "a1b2c3d4-e5f6-7001-abcd-000000000001"
+DISK_ID_2 = "a1b2c3d4-e5f6-7002-abcd-000000000002"
+SERIAL1 = "SN_DISK1_ABC123"
+SERIAL2 = "SN_DISK2_XYZ789"
 
 COORDINATOR_DATA_ONE_DISK = {
-    MOCK_WWN1: {
+    DISK_ID_1: {
         KEY_SUMMARY_DEVICE: {
             ATTR_DEVICE_NAME: "/dev/sda",
             ATTR_MODEL_NAME: "TestModelSDX",
             ATTR_FIRMWARE: "FW123",
-            "manufacturer": "TestManu",  # For DeviceInfo
-            ATTR_CAPACITY: 1000 * 1024 * 1024 * 1024,  # 1TB
+            "manufacturer": "TestManu",
+            ATTR_CAPACITY: 1000 * 1024**3,  # 1 TB
             ATTR_SUMMARY_DEVICE_STATUS: 0,
-            ATTR_SERIAL_NUMBER: MOCK_SERIAL1,
+            ATTR_SERIAL_NUMBER: SERIAL1,
             ATTR_UPDATED_AT: "2025-08-06T07:00:13.499643907Z",
         },
-        KEY_SUMMARY_SMART: {  # Fallback data
-            ATTR_TEMPERATURE: 25,
-            ATTR_POWER_ON_HOURS: 100,
-        },
+        KEY_SUMMARY_SMART: {ATTR_TEMPERATURE: 25, ATTR_POWER_ON_HOURS: 100},
         KEY_DETAILS_SMART_LATEST: {
             ATTR_TEMPERATURE: 28,
             ATTR_POWER_ON_HOURS: 105,
@@ -102,13 +98,13 @@ COORDINATOR_DATA_ONE_DISK = {
                     ATTR_ATTRIBUTE_ID: 5,
                     "value": 100,
                     "raw_value": "0",
-                    ATTR_SMART_ATTRIBUTE_STATUS_CODE: 0,  # <-- ADD HERE (for "Passed")
+                    ATTR_SMART_ATTRIBUTE_STATUS_CODE: 0,
                 },
                 "194": {
                     ATTR_ATTRIBUTE_ID: 194,
                     "value": 72,
                     "raw_value": "28",
-                    ATTR_SMART_ATTRIBUTE_STATUS_CODE: 0,  # <-- ADD HERE (for "Passed")
+                    ATTR_SMART_ATTRIBUTE_STATUS_CODE: 0,
                 },
             },
         },
@@ -119,833 +115,512 @@ COORDINATOR_DATA_ONE_DISK = {
     }
 }
 
-COORDINATOR_DATA_TWO_DISKS = {
-    MOCK_WWN1: COORDINATOR_DATA_ONE_DISK[MOCK_WWN1],  # Reuse
-    MOCK_WWN2: {  # Second disk with fewer details for a simpler test
-        KEY_SUMMARY_DEVICE: {
-            ATTR_DEVICE_NAME: "/dev/sdb",
-            ATTR_MODEL_NAME: "AnotherSSD",
-            ATTR_FIRMWARE: "FWXYZ",
-            ATTR_CAPACITY: 500 * 1024 * 1024 * 1024,  # 500GB
-            ATTR_SUMMARY_DEVICE_STATUS: 1,  # Example: Warning status
-            ATTR_SERIAL_NUMBER: MOCK_SERIAL2,
-        },
-        KEY_SUMMARY_SMART: {},
-        KEY_DETAILS_SMART_LATEST: {  # Only one SMART attribute
-            ATTR_SMART_ATTRS: {
-                "9": {
-                    ATTR_ATTRIBUTE_ID: 9,
-                    "value": 90,
-                    "raw_value": "5000",
-                    ATTR_SMART_ATTRIBUTE_STATUS_CODE: 0,
-                },
-            }
-        },
-        KEY_DETAILS_METADATA: {"9": {ATTR_DISPLAY_NAME: "Power-On Hours"}},
-    },
-}
 
-# Hole alle Entity Descriptions für Hauptsensoren
-# Get all Entity Descriptions for main sensors
-# Assumption: MAIN_DISK_SENSOR_DESCRIPTIONS is available in scope
-MAIN_SENSOR_TEST_PARAMS = [
-    (
-        ATTR_TEMPERATURE,
-        COORDINATOR_DATA_ONE_DISK[MOCK_WWN1][KEY_DETAILS_SMART_LATEST][
-            ATTR_TEMPERATURE
-        ],
-        "°C",
-        "temperature",
-    ),
-    (
-        ATTR_POWER_ON_HOURS,
-        # Raw hours from Scrutiny stored as-is; HA converts to days for display
-        COORDINATOR_DATA_ONE_DISK[MOCK_WWN1][KEY_DETAILS_SMART_LATEST][
-            ATTR_POWER_ON_HOURS
-        ],
-        "h",
-        "duration",  # SensorDeviceClass.DURATION
-    ),
-]
+def _make_coordinator(data, last_update_success=True):
+    coord = MagicMock(spec=ScrutinyDataUpdateCoordinator)
+    coord.data = data
+    coord.last_update_success = last_update_success
+    return coord
 
 
-# Helper function to create a sensor instance with a mock coordinator
-def create_main_sensor(
-    hass: HomeAssistant,  # Often not directly needed by sensor logic, but for HA context
-    coordinator: ScrutinyDataUpdateCoordinator,  # The mocked coordinator
-    wwn: str,
-    entity_description: SensorEntityDescription,
-) -> ScrutinyMainDiskSensor:
-    """Helper to create a ScrutinyMainDiskSensor instance for testing."""
-    # DeviceInfo is normally created in async_setup_entry.
-    # For the unit test of the sensor, we can create it simplified here
-    # or pass a MagicMock if we don't want to check it in detail.
-    # Here we create a simple one to test sensor initialization.
-
-    # Hole die Daten für die DeviceInfo aus den Koordinator-Daten
-    # (simuliert, was async_setup_entry tun würde)
-    summary_device_data = coordinator.data.get(wwn, {}).get(KEY_SUMMARY_DEVICE, {})
-    serial_number = summary_device_data.get(ATTR_SERIAL_NUMBER)
-    model_part = summary_device_data.get(ATTR_MODEL_NAME, "Disk")
-    id_part = serial_number if serial_number else wwn[-6:]
-    device_info_name = f"{model_part} ({id_part})"
-    device_info = DeviceInfo(
-        identifiers={(DOMAIN, wwn)},
-        name=device_info_name,
-        model=summary_device_data.get(ATTR_MODEL_NAME),
-        serial_number=serial_number,
-        manufacturer=summary_device_data.get("manufacturer")
-        or "Scrutiny Integration Test",  # Adjusted
-        sw_version=summary_device_data.get(ATTR_FIRMWARE),
-        # via_device is less critical here for the sensor unit test
+def _make_entry(options=None):
+    return ConfigEntry(
+        entry_id="test_entry_id_sensor",
+        data={CONF_URL: "http://scrutiny.local:8080"},
+        options=options or {},
     )
 
-    sensor = ScrutinyMainDiskSensor(
-        coordinator=coordinator,
-        entity_description=entity_description,
-        wwn=wwn,
-        device_info=device_info,
-        serial_number=serial_number,
-        is_archived=False,
-    )
-    sensor.hass = hass  # Sensors often have a hass reference
-    return sensor
 
-
-# Helper function to create a ScrutinySmartAttributeSensor instance
-def create_smart_attribute_sensor(
-    hass: HomeAssistant,
-    coordinator: ScrutinyDataUpdateCoordinator,  # Mocked coordinator
-    wwn: str,
-    attribute_id_str: str,  # e.g., "5", "194"
-    # device_info wird normalerweise in async_setup_entry erstellt
-) -> ScrutinySmartAttributeSensor:
-    """Helper to create a ScrutinySmartAttributeSensor instance for testing."""
-    summary_device_data = coordinator.data.get(wwn, {}).get(KEY_SUMMARY_DEVICE, {})
-    serial_number = summary_device_data.get(ATTR_SERIAL_NUMBER)
-    model_part = summary_device_data.get(ATTR_MODEL_NAME, "Disk")
-    id_part = serial_number if serial_number else wwn[-6:]
-    device_info_name = f"{model_part} ({id_part})"
-    device_info = DeviceInfo(  # Simplified DeviceInfo for the test
-        identifiers={(DOMAIN, wwn)},
-        name=device_info_name,
-        model=summary_device_data.get(ATTR_MODEL_NAME),
-        serial_number=serial_number,
-        manufacturer="Scrutiny Test SMART",
+def _make_device_info(disk_id, data):
+    summary = data.get(disk_id, {}).get(KEY_SUMMARY_DEVICE, {})
+    serial = summary.get(ATTR_SERIAL_NUMBER)
+    model = summary.get(ATTR_MODEL_NAME, "Disk")
+    id_part = serial or disk_id[-6:]
+    return DeviceInfo(
+        identifiers={(DOMAIN, disk_id)},
+        name=f"{model} ({id_part})",
+        model=model,
+        serial_number=serial,
+        manufacturer=summary.get("manufacturer") or "Scrutiny",
+        sw_version=summary.get(ATTR_FIRMWARE),
     )
 
-    # Get the specific metadata for this attribute
-    # The numeric ID is contained within the attribute data object itself
-    attribute_data = coordinator.data[wwn][KEY_DETAILS_SMART_LATEST][ATTR_SMART_ATTRS][
-        attribute_id_str
-    ]
-    numeric_attr_id = attribute_data.get(ATTR_ATTRIBUTE_ID)
-    attribute_metadata = coordinator.data[wwn][KEY_DETAILS_METADATA].get(
-        str(numeric_attr_id), {}
-    )
 
-    sensor = ScrutinySmartAttributeSensor(
-        coordinator=coordinator,
-        wwn=wwn,
-        device_info=device_info,
-        attribute_id_str=attribute_id_str,
-        attribute_metadata=attribute_metadata,
-        serial_number=serial_number,
-        is_archived=False,
-    )
-    sensor.hass = hass
-    return sensor
+# ---------------------------------------------------------------------------
+# async_setup_entry
+# ---------------------------------------------------------------------------
 
 
-@pytest.mark.asyncio
-async def test_async_setup_entry_one_disk(hass: HomeAssistant):
-    """Test sensor setup with one disk in coordinator data."""
-    mock_entry = MockConfigEntry(domain=DOMAIN, entry_id="test_entry_id_sensor")
+class TestAsyncSetupEntry(unittest.TestCase):
+    def setUp(self):
+        reset_registry()
 
-    mock_coordinator = MagicMock(spec=ScrutinyDataUpdateCoordinator)
-    mock_coordinator.data = COORDINATOR_DATA_ONE_DISK
-    # Add the 'last_update_success' attribute to the mock:
-    mock_coordinator.last_update_success = True
+    def test_one_disk_default_options_creates_main_sensors_only(self):
+        """Default options (no SMART attrs opted in): only main sensors are created."""
+        coord = _make_coordinator(COORDINATOR_DATA_ONE_DISK)
+        entry = _make_entry()
+        entry.runtime_data = coord
 
-    mock_entry.runtime_data = mock_coordinator
-    mock_async_add_entities = MagicMock()
-
-    await async_setup_entry(hass, mock_entry, mock_async_add_entities)
-    await hass.async_block_till_done()
-    # ... (Rest of the assertions remain the same) ...
-
-    mock_async_add_entities.assert_called_once()
-    added_entities = mock_async_add_entities.call_args[0][0]
-
-    # Use the imported constant if it's now available,
-    # or the hardcoded number if you haven't corrected the import yet.
-    # Assumption: MAIN_DISK_SENSOR_DESCRIPTIONS is now correctly imported or replicated.
-    num_main_sensors = len(MAIN_DISK_SENSOR_DESCRIPTIONS)
-    # With default options, SMART attribute sensors are NOT created (opt-in).
-    # The default setup should only create the main sensors.
-    expected_total_sensors = num_main_sensors
-
-    assert len(added_entities) == expected_total_sensors
-
-    main_sensor_count = 0
-    smart_attribute_sensor_count = 0
-    for entity in added_entities:
-        if isinstance(entity, ScrutinyMainDiskSensor):
-            main_sensor_count += 1
-            assert entity.device_info is not None  # type: ignore
-            assert entity.device_info["identifiers"] == {(DOMAIN, MOCK_WWN1)}  # type: ignore
-            assert entity.device_info["via_device"] == (DOMAIN, "test_entry_id_sensor")  # type: ignore
-            assert (
-                COORDINATOR_DATA_ONE_DISK[MOCK_WWN1][KEY_SUMMARY_DEVICE][
-                    ATTR_MODEL_NAME
-                ]  # type: ignore
-                in entity.device_info["name"]  # type: ignore
+        added = []
+        run(
+            async_setup_entry(
+                HomeAssistant(), entry, lambda entities: added.extend(entities)
             )
-            # Serial number must appear in the device name and in the DeviceInfo field
-            assert MOCK_SERIAL1 in entity.device_info["name"]  # type: ignore
-            assert entity.device_info.get("serial_number") == MOCK_SERIAL1  # type: ignore
-        elif isinstance(entity, ScrutinySmartAttributeSensor):
-            smart_attribute_sensor_count += 1
+        )
 
-    assert main_sensor_count == num_main_sensors
-    # No SMART attribute sensors by default
-    assert smart_attribute_sensor_count == 0
+        self.assertEqual(len(added), len(MAIN_DISK_SENSOR_DESCRIPTIONS))
+        self.assertTrue(all(isinstance(e, ScrutinyMainDiskSensor) for e in added))
 
-    print(f"SUCCESS: {test_async_setup_entry_one_disk.__name__} passed!")
+    def test_smart_critical_attrs_opt_in(self):
+        """Critical-attrs opt-in: attribute sensors for critical attributes only."""
+        from custom_components.scrutiny.const import CONF_ENABLE_CRITICAL_ATTRS
 
+        coord = _make_coordinator(COORDINATOR_DATA_ONE_DISK)
+        entry = _make_entry(options={CONF_ENABLE_CRITICAL_ATTRS: True})
+        entry.runtime_data = coord
 
-@pytest.mark.asyncio
-async def test_async_setup_entry_coordinator_no_data(hass: HomeAssistant):
-    """Test sensor setup when coordinator.data is None."""
-    mock_entry = MockConfigEntry(domain=DOMAIN, entry_id="test_entry_no_data")
-    mock_coordinator = MagicMock(spec=ScrutinyDataUpdateCoordinator)
-    mock_coordinator.data = None  # Coordinator has no data
-    # last_update_success is less relevant here since data is already None,
-    # but we set it for consistency in case it's checked.
-    mock_coordinator.last_update_success = False
+        added = []
+        run(
+            async_setup_entry(
+                HomeAssistant(), entry, lambda entities: added.extend(entities)
+            )
+        )
 
-    mock_entry.runtime_data = mock_coordinator
-    mock_async_add_entities = MagicMock()
-
-    await async_setup_entry(hass, mock_entry, mock_async_add_entities)
-    await hass.async_block_till_done()
-    # async_add_entities should NOT have been called
-    mock_async_add_entities.assert_not_called()
-
-    print(f"SUCCESS: {test_async_setup_entry_coordinator_no_data.__name__} passed!")
-
-
-@pytest.mark.asyncio
-async def test_async_setup_entry_coordinator_empty_data_dict(hass: HomeAssistant):
-    """Test sensor setup when coordinator.data is an empty dictionary."""
-    mock_entry = MockConfigEntry(domain=DOMAIN, entry_id="test_entry_empty_data")
-    mock_coordinator = MagicMock(spec=ScrutinyDataUpdateCoordinator)
-    mock_coordinator.data = {}  # Coordinator has an empty data dict
-    mock_coordinator.last_update_success = True  # Update was successful, but no data
-
-    mock_entry.runtime_data = mock_coordinator
-    mock_async_add_entities = MagicMock()
-
-    await async_setup_entry(hass, mock_entry, mock_async_add_entities)
-    await hass.async_block_till_done()
-
-    mock_async_add_entities.assert_not_called()
-
-    print(
-        f"SUCCESS: {test_async_setup_entry_coordinator_empty_data_dict.__name__} passed!"
-    )
-
-
-@pytest.mark.asyncio
-async def test_async_setup_entry_disk_missing_smart_attrs(hass: HomeAssistant, caplog):
-    """Test sensor setup if a disk's data is missing ATTR_SMART_ATTRS."""
-    mock_entry = MockConfigEntry(domain=DOMAIN, entry_id="test_entry_missing_smart")
-    # Modify the test data for a disk to remove ATTR_SMART_ATTRS
-    # or set it to an invalid type.
-    # Important: Make a copy to avoid modifying the original test data!
-    import copy
-
-    disk_data_no_smart_attrs = copy.deepcopy(COORDINATOR_DATA_ONE_DISK[MOCK_WWN1])
-    # Remove the key or set it to something other than a dict
-    if ATTR_SMART_ATTRS in disk_data_no_smart_attrs[KEY_DETAILS_SMART_LATEST]:
-        del disk_data_no_smart_attrs[KEY_DETAILS_SMART_LATEST][ATTR_SMART_ATTRS]
-    # Alternativ:
-    # disk_data_no_smart_attrs[KEY_DETAILS_SMART_LATEST][ATTR_SMART_ATTRS] = "not a dict"
-
-    coordinator_data_faulty_disk = {MOCK_WWN1: disk_data_no_smart_attrs}
-
-    mock_coordinator = MagicMock(spec=ScrutinyDataUpdateCoordinator)
-    mock_coordinator.data = coordinator_data_faulty_disk
-    mock_coordinator.last_update_success = True
-
-    mock_entry.runtime_data = mock_coordinator
-    mock_async_add_entities = MagicMock()
-
-    # caplog fixture to check log output
-    import logging
-
-    caplog.set_level(logging.WARNING)
-
-    await async_setup_entry(hass, mock_entry, mock_async_add_entities)
-    await hass.async_block_till_done()
-
-    mock_async_add_entities.assert_called_once()
-    added_entities = mock_async_add_entities.call_args[0][0]
-
-    # Only the main sensors should have been created
-    num_main_sensors = len(MAIN_DISK_SENSOR_DESCRIPTIONS)  # Or your reference
-    assert len(added_entities) == num_main_sensors
-
-    main_sensor_count = 0
-    for entity in added_entities:
-        if isinstance(entity, ScrutinyMainDiskSensor):
-            main_sensor_count += 1
-    assert main_sensor_count == num_main_sensors
-    # Check if the warning was logged
-    # The exact log message depends on your implementation
-    # (whether you log the "key missing" case differently from "wrong type").
-    # If ATTR_SMART_ATTRS is completely missing, .get(ATTR_SMART_ATTRS, {}) will return an empty dict,
-    # and the `isinstance` check would be `True`. The `else` block would not be reached.
-    # To test the `else` block, set ATTR_SMART_ATTRS to "not a dict".
-
-    # Um den else-Block zu testen:
-    # disk_data_no_smart_attrs[KEY_DETAILS_SMART_LATEST][ATTR_SMART_ATTRS] = "not a dict"
-    # ... (dann den Test mit dieser Änderung laufen lassen)
-    # assert "SMART attributes data for disk" in caplog.text
-    # assert "is not a dict" in caplog.text
-
-    print(
-        f"SUCCESS: {test_async_setup_entry_disk_missing_smart_attrs.__name__} passed!"
-    )
-
-
-@pytest.mark.asyncio
-async def test_main_disk_sensor_temperature(hass: HomeAssistant):
-    """Test ScrutinyMainDiskSensor for Temperature."""
-    wwn = MOCK_WWN1
-    temp_description = next(
-        d for d in MAIN_DISK_SENSOR_DESCRIPTIONS if d.key == ATTR_TEMPERATURE
-    )
-
-    mock_coordinator = MagicMock(spec=ScrutinyDataUpdateCoordinator)
-    mock_coordinator.data = COORDINATOR_DATA_ONE_DISK
-    mock_coordinator.last_update_success = True
-
-    sensor = create_main_sensor(hass, mock_coordinator, wwn, temp_description)
-
-    # Initialization
-    assert sensor.unique_id == f"{DOMAIN}_{wwn}_{ATTR_TEMPERATURE}"
-    assert sensor.entity_description.translation_key == "temperature"
-    assert sensor.available is True
-    assert (
-        sensor.native_value
-        == COORDINATOR_DATA_ONE_DISK[wwn][KEY_DETAILS_SMART_LATEST][ATTR_TEMPERATURE]
-    )
-    assert sensor.native_unit_of_measurement == "°C"
-    assert sensor.device_class == "temperature"
-
-    # Test _handle_coordinator_update with new data
-    updated_disk_data_wwn1 = COORDINATOR_DATA_ONE_DISK[wwn].copy()
-    updated_disk_data_wwn1[KEY_DETAILS_SMART_LATEST] = updated_disk_data_wwn1[
-        KEY_DETAILS_SMART_LATEST
-    ].copy()
-    updated_disk_data_wwn1[KEY_DETAILS_SMART_LATEST][ATTR_TEMPERATURE] = 35
-    mock_coordinator.data = {
-        wwn: updated_disk_data_wwn1
-    }  # Only this disk with new data
-
-    with patch.object(
-        sensor, "async_write_ha_state", new_callable=MagicMock
-    ) as mock_write_state_1:
-        sensor._handle_coordinator_update()
-        await hass.async_block_till_done()
-    assert sensor.native_value == 35
-    mock_write_state_1.assert_called_once()
-
-    # Test 'available' property and native_value when coordinator was not successful
-    mock_coordinator.last_update_success = False
-    # Important: After changing last_update_success, the sensor state must be updated
-    with patch.object(
-        sensor, "async_write_ha_state", new_callable=MagicMock
-    ) as mock_write_state_2:
-        sensor._handle_coordinator_update()  # Simulate the sensor reacting to the update
-        await hass.async_block_till_done()
-
-    assert sensor.available is False  # Should be False now
-    assert (
-        sensor.native_value is None
-    )  # Should be None now, as _update_sensor_state was called
-    mock_write_state_2.assert_called_once()  # async_write_ha_state should have been called
-
-    # Test 'available' property and native_value when the disk is not in the data
-    mock_coordinator.last_update_success = True  # Update itself is successful again
-    mock_coordinator.data = {}  # But no more data for this disk
-
-    # Important: After changing coordinator data, the sensor state must be updated
-    with patch.object(
-        sensor, "async_write_ha_state", new_callable=MagicMock
-    ) as mock_write_state_3:
-        sensor._handle_coordinator_update()  # Simulate the sensor reacting to the update
-        await hass.async_block_till_done()
-
-    assert sensor.available is False  # Sollte jetzt False sein
-    assert sensor.native_value is None  # Sollte jetzt None sein
-    mock_write_state_3.assert_called_once()
-
-    print(f"SUCCESS: {test_main_disk_sensor_temperature.__name__} passed!")
-
-
-@pytest.mark.parametrize(
-    "sensor_key, initial_value, unit, device_class_val", MAIN_SENSOR_TEST_PARAMS
-)
-@pytest.mark.asyncio
-async def test_main_disk_sensor_generic(
-    hass: HomeAssistant,
-    sensor_key: str,
-    initial_value: Any,
-    unit: str | None,
-    device_class_val: str | None,
-):
-    wwn = MOCK_WWN1
-    description = next(d for d in MAIN_DISK_SENSOR_DESCRIPTIONS if d.key == sensor_key)
-
-    mock_coordinator = MagicMock(spec=ScrutinyDataUpdateCoordinator)
-    mock_coordinator.data = COORDINATOR_DATA_ONE_DISK
-    mock_coordinator.last_update_success = True
-
-    sensor = create_main_sensor(hass, mock_coordinator, wwn, description)
-
-    assert sensor.unique_id == f"{DOMAIN}_{wwn}_{sensor_key}"
-    assert sensor.entity_description.translation_key is not None
-    assert sensor.available is True
-    # Adjust specific logic for capacity and status mapping here if necessary
-    if sensor_key == ATTR_CAPACITY:
-        assert sensor.native_value == round(initial_value / (1024**3), 2)
-    elif sensor_key == ATTR_SUMMARY_DEVICE_STATUS:
-        # Here you would need to get the status code from the test data and check the mapping
-        status_code = COORDINATOR_DATA_ONE_DISK[wwn][KEY_SUMMARY_DEVICE][
-            ATTR_SUMMARY_DEVICE_STATUS
+        smart_sensors = [
+            e for e in added if isinstance(e, ScrutinySmartAttributeSensor)
         ]
+        # Only attribute "5" is critical; "194" is not
+        self.assertEqual(len(smart_sensors), 1)
+        self.assertEqual(smart_sensors[0]._attribute_id_str, "5")
+
+    def test_smart_all_attrs_opt_in(self):
+        """All-attrs opt-in: attribute sensors created for every SMART attribute."""
+        from custom_components.scrutiny.const import CONF_ENABLE_ALL_ATTRS
+
+        coord = _make_coordinator(COORDINATOR_DATA_ONE_DISK)
+        entry = _make_entry(options={CONF_ENABLE_ALL_ATTRS: True})
+        entry.runtime_data = coord
+
+        added = []
+        run(
+            async_setup_entry(
+                HomeAssistant(), entry, lambda entities: added.extend(entities)
+            )
+        )
+
+        smart_sensors = [
+            e for e in added if isinstance(e, ScrutinySmartAttributeSensor)
+        ]
+        self.assertEqual(len(smart_sensors), 2)  # attrs "5" and "194"
+
+    def test_raw_value_sensors_created_when_enabled(self):
         from custom_components.scrutiny.const import (
-            SCRUTINY_DEVICE_SUMMARY_STATUS_MAP,
-            SCRUTINY_DEVICE_SUMMARY_STATUS_UNKNOWN,
+            CONF_ENABLE_ALL_ATTRS,
+            CONF_ENABLE_RAW_VALUES,
         )
 
-        assert sensor.native_value == SCRUTINY_DEVICE_SUMMARY_STATUS_MAP.get(
-            status_code, SCRUTINY_DEVICE_SUMMARY_STATUS_UNKNOWN
+        coord = _make_coordinator(COORDINATOR_DATA_ONE_DISK)
+        entry = _make_entry(
+            options={CONF_ENABLE_ALL_ATTRS: True, CONF_ENABLE_RAW_VALUES: True}
         )
-    # ... similar logic for ATTR_SMART_OVERALL_STATUS ...
-    else:
-        assert sensor.native_value == initial_value
+        entry.runtime_data = coord
 
-    assert sensor.native_unit_of_measurement == unit
-    assert sensor.device_class == device_class_val
-    # ... (further tests for _handle_coordinator_update and available as in the temperature sensor test) ...
+        added = []
+        run(
+            async_setup_entry(
+                HomeAssistant(), entry, lambda entities: added.extend(entities)
+            )
+        )
 
-    print(f"SUCCESS: test_main_disk_sensor_generic for {sensor_key} passed!")
+        raw_sensors = [e for e in added if isinstance(e, ScrutinySmartRawValueSensor)]
+        self.assertEqual(len(raw_sensors), 2)
+
+    def test_no_data_skips_setup(self):
+        coord = _make_coordinator(None)
+        entry = _make_entry()
+        entry.runtime_data = coord
+
+        added = []
+        run(
+            async_setup_entry(
+                HomeAssistant(), entry, lambda entities: added.extend(entities)
+            )
+        )
+        self.assertEqual(len(added), 0)
+
+    def test_empty_data_dict_skips_setup(self):
+        coord = _make_coordinator({})
+        entry = _make_entry()
+        entry.runtime_data = coord
+
+        added = []
+        run(
+            async_setup_entry(
+                HomeAssistant(), entry, lambda entities: added.extend(entities)
+            )
+        )
+        self.assertEqual(len(added), 0)
 
 
-@pytest.mark.asyncio
-async def test_last_smart_update_sensor(hass: HomeAssistant):
-    """Test the last_smart_update TIMESTAMP sensor parses Scrutiny's timestamp correctly.
+# ---------------------------------------------------------------------------
+# ScrutinyMainDiskSensor
+# ---------------------------------------------------------------------------
 
-    Scrutiny returns Go-formatted timestamps with nanosecond precision
-    (e.g. "2025-08-06T07:00:13.499643907Z"). The sensor must parse these
-    to an aware datetime object so HA can display and compare them correctly.
-    """
-    from datetime import datetime, timezone
 
-    wwn = MOCK_WWN1
-    description = next(
-        d for d in MAIN_DISK_SENSOR_DESCRIPTIONS if d.key == ATTR_UPDATED_AT
-    )
+class TestMainDiskSensor(unittest.TestCase):
+    def _make_sensor(self, key, data=None, last_success=True):
+        data = data or COORDINATOR_DATA_ONE_DISK
+        coord = _make_coordinator(data, last_success)
+        desc = next(d for d in MAIN_DISK_SENSOR_DESCRIPTIONS if d.key == key)
+        return ScrutinyMainDiskSensor(
+            coordinator=coord,
+            entity_description=desc,
+            disk_id=DISK_ID_1,
+            device_info=_make_device_info(DISK_ID_1, data),
+            serial_number=SERIAL1,
+            is_archived=False,
+        )
 
-    mock_coordinator = MagicMock(spec=ScrutinyDataUpdateCoordinator)
-    mock_coordinator.data = COORDINATOR_DATA_ONE_DISK
-    mock_coordinator.last_update_success = True
+    def test_temperature_reads_from_details(self):
+        sensor = self._make_sensor(ATTR_TEMPERATURE)
+        self.assertTrue(sensor.available)
+        self.assertEqual(sensor.native_value, 28)  # from KEY_DETAILS_SMART_LATEST
 
-    sensor = create_main_sensor(hass, mock_coordinator, wwn, description)
+    def test_temperature_falls_back_to_summary(self):
+        data = copy.deepcopy(COORDINATOR_DATA_ONE_DISK)
+        del data[DISK_ID_1][KEY_DETAILS_SMART_LATEST][ATTR_TEMPERATURE]
+        sensor = self._make_sensor(ATTR_TEMPERATURE, data=data)
+        self.assertEqual(sensor.native_value, 25)  # from KEY_SUMMARY_SMART
 
-    assert sensor.available is True
-    assert sensor.device_class == "timestamp"
+    def test_power_on_hours(self):
+        sensor = self._make_sensor(ATTR_POWER_ON_HOURS)
+        self.assertEqual(sensor.native_value, 105)
 
-    # Verify the nanosecond timestamp parsed to the correct aware datetime
-    expected_dt = datetime(2025, 8, 6, 7, 0, 13, 499643, tzinfo=timezone.utc)
-    assert isinstance(sensor.native_value, datetime)
-    assert sensor.native_value == expected_dt
+    def test_device_status_mapping(self):
+        sensor = self._make_sensor(ATTR_SUMMARY_DEVICE_STATUS)
+        self.assertEqual(sensor.native_value, SCRUTINY_DEVICE_SUMMARY_STATUS_MAP[0])
 
-    # Verify missing UpdatedAt gracefully returns None
-    import copy
-    data_no_ts = copy.deepcopy(COORDINATOR_DATA_ONE_DISK)
-    del data_no_ts[wwn][KEY_SUMMARY_DEVICE][ATTR_UPDATED_AT]
-    mock_coordinator.data = data_no_ts
-    with patch.object(sensor, "async_write_ha_state", new_callable=MagicMock):
+    def test_device_status_unknown_when_none(self):
+        data = copy.deepcopy(COORDINATOR_DATA_ONE_DISK)
+        data[DISK_ID_1][KEY_SUMMARY_DEVICE][ATTR_SUMMARY_DEVICE_STATUS] = None
+        sensor = self._make_sensor(ATTR_SUMMARY_DEVICE_STATUS, data=data)
+        self.assertEqual(sensor.native_value, SCRUTINY_DEVICE_SUMMARY_STATUS_UNKNOWN)
+
+    def test_capacity_converted_to_gigabytes(self):
+        sensor = self._make_sensor(ATTR_CAPACITY)
+        # 1000 * 1024^3 bytes → gigabytes (base-2)
+        expected = round(
+            COORDINATOR_DATA_ONE_DISK[DISK_ID_1][KEY_SUMMARY_DEVICE][ATTR_CAPACITY]
+            / (1024**3),
+            2,
+        )
+        self.assertAlmostEqual(sensor.native_value, expected, places=2)
+
+    def test_power_cycle_count(self):
+        sensor = self._make_sensor(ATTR_POWER_CYCLE_COUNT)
+        self.assertEqual(sensor.native_value, 10)
+
+    def test_smart_overall_status(self):
+        sensor = self._make_sensor(ATTR_SMART_OVERALL_STATUS)
+        self.assertEqual(sensor.native_value, ATTR_SMART_STATUS_MAP[0])
+
+    def test_timestamp_parsed_correctly(self):
+        sensor = self._make_sensor(ATTR_UPDATED_AT)
+        expected = datetime(2025, 8, 6, 7, 0, 13, 499643, tzinfo=UTC)
+        self.assertIsInstance(sensor.native_value, datetime)
+        self.assertEqual(sensor.native_value, expected)
+
+    def test_timestamp_missing_returns_none(self):
+        data = copy.deepcopy(COORDINATOR_DATA_ONE_DISK)
+        del data[DISK_ID_1][KEY_SUMMARY_DEVICE][ATTR_UPDATED_AT]
+        sensor = self._make_sensor(ATTR_UPDATED_AT, data=data)
+        self.assertIsNone(sensor.native_value)
+
+    def test_timestamp_malformed_returns_none(self):
+        data = copy.deepcopy(COORDINATOR_DATA_ONE_DISK)
+        data[DISK_ID_1][KEY_SUMMARY_DEVICE][ATTR_UPDATED_AT] = "not-a-timestamp"
+        sensor = self._make_sensor(ATTR_UPDATED_AT, data=data)
+        self.assertIsNone(sensor.native_value)
+
+    def test_unavailable_when_coordinator_failed(self):
+        sensor = self._make_sensor(ATTR_TEMPERATURE, last_success=False)
+        self.assertFalse(sensor.available)
+        self.assertIsNone(sensor.native_value)
+
+    def test_unavailable_when_disk_id_missing_from_data(self):
+        coord = _make_coordinator({})
+        desc = next(
+            d for d in MAIN_DISK_SENSOR_DESCRIPTIONS if d.key == ATTR_TEMPERATURE
+        )
+        sensor = ScrutinyMainDiskSensor(
+            coordinator=coord,
+            entity_description=desc,
+            disk_id=DISK_ID_1,
+            device_info=DeviceInfo(identifiers={(DOMAIN, DISK_ID_1)}, name="x"),
+        )
+        self.assertFalse(sensor.available)
+
+    def test_handle_coordinator_update_writes_state(self):
+        coord = _make_coordinator(COORDINATOR_DATA_ONE_DISK)
+        desc = next(
+            d for d in MAIN_DISK_SENSOR_DESCRIPTIONS if d.key == ATTR_TEMPERATURE
+        )
+        sensor = ScrutinyMainDiskSensor(
+            coordinator=coord,
+            entity_description=desc,
+            disk_id=DISK_ID_1,
+            device_info=_make_device_info(DISK_ID_1, COORDINATOR_DATA_ONE_DISK),
+        )
+        written = []
+        sensor.async_write_ha_state = lambda: written.append(1)
+
+        updated = copy.deepcopy(COORDINATOR_DATA_ONE_DISK)
+        updated[DISK_ID_1][KEY_DETAILS_SMART_LATEST][ATTR_TEMPERATURE] = 45
+        coord.data = updated
         sensor._handle_coordinator_update()
-    assert sensor.native_value is None
 
-    # Verify a malformed timestamp returns None without raising
-    data_bad_ts = copy.deepcopy(COORDINATOR_DATA_ONE_DISK)
-    data_bad_ts[wwn][KEY_SUMMARY_DEVICE][ATTR_UPDATED_AT] = "not-a-timestamp"
-    mock_coordinator.data = data_bad_ts
-    with patch.object(sensor, "async_write_ha_state", new_callable=MagicMock):
-        sensor._handle_coordinator_update()
-    assert sensor.native_value is None
+        self.assertEqual(sensor.native_value, 45)
+        self.assertEqual(len(written), 1)
 
-    print("SUCCESS: test_last_smart_update_sensor passed!")
+    def test_unique_id_format(self):
+        sensor = self._make_sensor(ATTR_TEMPERATURE)
+        self.assertEqual(sensor.unique_id, f"{DOMAIN}_{DISK_ID_1}_{ATTR_TEMPERATURE}")
 
+    def test_extra_state_attributes_include_serial(self):
+        sensor = self._make_sensor(ATTR_TEMPERATURE)
+        self.assertEqual(sensor.extra_state_attributes.get(ATTR_SERIAL_NUMBER), SERIAL1)
 
-@pytest.mark.asyncio
-async def test_smart_attribute_sensor_update_and_availability(hass: HomeAssistant):
-    """Test _handle_coordinator_update and availability of ScrutinySmartAttributeSensor."""
-    wwn = MOCK_WWN1
-    attr_id_str = "194"  # Let's test with attribute "194" (Temperature)
-
-    mock_coordinator = MagicMock(spec=ScrutinyDataUpdateCoordinator)
-    initial_data = copy.deepcopy(COORDINATOR_DATA_ONE_DISK)
-    mock_coordinator.data = initial_data
-    mock_coordinator.last_update_success = True
-
-    sensor = create_smart_attribute_sensor(hass, mock_coordinator, wwn, attr_id_str)
-
-    # --- Initial state ---
-    initial_attr_data = initial_data[wwn][KEY_DETAILS_SMART_LATEST][ATTR_SMART_ATTRS][
-        attr_id_str
-    ]
-    initial_status_code = initial_attr_data[ATTR_SMART_ATTRIBUTE_STATUS_CODE]
-    initial_raw_value = initial_attr_data["raw_value"]
-
-    assert sensor.available is True
-    assert sensor.native_value == ATTR_SMART_STATUS_MAP.get(
-        initial_status_code, ATTR_SMART_STATUS_UNKNOWN
-    )
-    assert sensor.extra_state_attributes[ATTR_RAW_VALUE] == initial_raw_value  # type: ignore
-
-    # --- Simulate a coordinator update with changed values for the attribute ---
-    updated_data_step1 = copy.deepcopy(initial_data)
-    updated_data_step1[wwn][KEY_DETAILS_SMART_LATEST][ATTR_SMART_ATTRS][attr_id_str][
-        ATTR_SMART_ATTRIBUTE_STATUS_CODE
-    ] = 2  # Warning
-    updated_data_step1[wwn][KEY_DETAILS_SMART_LATEST][ATTR_SMART_ATTRS][attr_id_str][
-        "raw_value"
-    ] = "35"
-    mock_coordinator.data = updated_data_step1
-
-    with patch.object(
-        sensor, "async_write_ha_state", new_callable=MagicMock
-    ) as mock_write_state_update:
-        sensor._handle_coordinator_update()
-        await hass.async_block_till_done()
-
-    assert sensor.available is True
-    assert sensor.native_value == ATTR_SMART_STATUS_MAP.get(
-        2, ATTR_SMART_STATUS_UNKNOWN
-    )
-    assert sensor.extra_state_attributes[ATTR_RAW_VALUE] == "35"  # type: ignore
-    mock_write_state_update.assert_called_once()
-
-    # --- Simulate that the specific SMART attribute is missing in the data ---
-    # The sensor is now available=True, native_value="Warning", raw_value="35"
-    data_attr_missing = copy.deepcopy(
-        updated_data_step1
-    )  # Starte vom vorherigen Zustand
-    del data_attr_missing[wwn][KEY_DETAILS_SMART_LATEST][ATTR_SMART_ATTRS][attr_id_str]
-    mock_coordinator.data = data_attr_missing
-
-    with patch.object(
-        sensor, "async_write_ha_state", new_callable=MagicMock
-    ) as mock_write_state_attr_missing:
-        sensor._handle_coordinator_update()  # This should cause a state change
-        await hass.async_block_till_done()
-
-    assert sensor.available is False
-    assert sensor.native_value is None
-    assert sensor.extra_state_attributes == {}
-    mock_write_state_attr_missing.assert_called_once()  # Expect call, as state changes from True/Warning to False/None
-
-    # --- Simulate that the entire disk is missing in the data ---
-    # Der Sensor ist jetzt available=False, native_value=None, extra_state_attributes={}
-    mock_coordinator.data = {}  # Keine Daten für irgendeine Disk
-
-    # print(f"DEBUG: Before _handle_coordinator_update for disk_missing. Sensor available: {sensor.available}")
-
-    with patch.object(
-        sensor, "async_write_ha_state", new_callable=MagicMock
-    ) as mock_write_state_disk_missing:
-        sensor._handle_coordinator_update()  # State does not change (remains unavailable)
-        await hass.async_block_till_done()
-
-    # print(f"DEBUG: After _handle_coordinator_update for disk_missing. Sensor available: {sensor.available}, native_value: {sensor.native_value}")
-    assert sensor.available is False
-    assert sensor.native_value is None
-    assert sensor.extra_state_attributes == {}
-    # If the state doesn't change (was already unavailable), async_write_ha_state is not called
-    # if your _handle_coordinator_update has a corresponding optimization.
-    mock_write_state_disk_missing.assert_not_called()  # <--- CHANGED ASSERTION
-
-    # --- Simulate that the coordinator update fails ---
-    # FIRST, set the sensor back to an available state to force a change
-    mock_coordinator.data = copy.deepcopy(initial_data)  # Valid data
-    mock_coordinator.last_update_success = True
-    with patch.object(
-        sensor, "async_write_ha_state", new_callable=MagicMock
-    ) as mock_write_state_re_enable:
-        sensor._handle_coordinator_update()
-        await hass.async_block_till_done()
-    assert sensor.available is True  # Ensure it's available again
-    mock_write_state_re_enable.assert_called_once()  # There was a state change
-
-    # NOW simulate the coordinator error
-    mock_coordinator.last_update_success = False  # Update was not successful
-
-    with patch.object(
-        sensor, "async_write_ha_state", new_callable=MagicMock
-    ) as mock_write_state_coord_fail:
-        sensor._handle_coordinator_update()  # This should cause a state change
-        await hass.async_block_till_done()
-
-    assert sensor.available is False
-    assert sensor.native_value is None
-    assert sensor.extra_state_attributes == {}
-    mock_write_state_coord_fail.assert_called_once()  # Expect call, as state changes from True to False
-
-    print(
-        f"SUCCESS: {test_smart_attribute_sensor_update_and_availability.__name__} passed!"
-    )
+    def test_archived_sensor_extra_attribute(self):
+        coord = _make_coordinator(COORDINATOR_DATA_ONE_DISK)
+        desc = next(
+            d for d in MAIN_DISK_SENSOR_DESCRIPTIONS if d.key == ATTR_TEMPERATURE
+        )
+        sensor = ScrutinyMainDiskSensor(
+            coordinator=coord,
+            entity_description=desc,
+            disk_id=DISK_ID_1,
+            device_info=_make_device_info(DISK_ID_1, COORDINATOR_DATA_ONE_DISK),
+            is_archived=True,
+        )
+        self.assertTrue(sensor.extra_state_attributes.get(ATTR_ARCHIVED))
 
 
-@pytest.mark.parametrize(
-    "attr_id_str_to_test, expected_fallback_name_part_in_description, is_numeric_id_case",
-    [
-        ("99", "Attribute 99", True),
-        ("unknown_nvme_attr", "Unknown Nvme Attr", False),
-    ],
-)
-@pytest.mark.asyncio
-async def test_smart_attribute_sensor_name_fallback(
-    hass: HomeAssistant,
-    attr_id_str_to_test: str,
-    expected_fallback_name_part_in_description: str,  # Umbenannt für Klarheit
-    is_numeric_id_case: bool,
-):
-    """Test ScrutinySmartAttributeSensor name generation fallback and component parts."""
-    wwn = MOCK_WWN1
-
-    import copy
-
-    current_test_data = copy.deepcopy(COORDINATOR_DATA_ONE_DISK)
-
-    # Test-Attribut hinzufügen ohne DisplayName in Metadaten
-    numeric_attr_id_for_test_case = (
-        int(attr_id_str_to_test) if is_numeric_id_case else None
-    )  # Für ATTR_ATTRIBUTE_ID
-
-    current_test_data[wwn][KEY_DETAILS_SMART_LATEST][ATTR_SMART_ATTRS][
-        attr_id_str_to_test
-    ] = {
-        ATTR_ATTRIBUTE_ID: numeric_attr_id_for_test_case
-        if is_numeric_id_case
-        else attr_id_str_to_test,
-        "value": 50,
-        ATTR_SMART_ATTRIBUTE_STATUS_CODE: 2,
-    }
-    current_test_data[wwn][KEY_DETAILS_METADATA][
-        attr_id_str_to_test
-    ] = {  # Verwende attr_id_str_to_test als Key
-        ATTR_IS_CRITICAL: False
-    }
-
-    mock_coordinator = MagicMock(spec=ScrutinyDataUpdateCoordinator)
-    mock_coordinator.data = current_test_data
-    mock_coordinator.last_update_success = True
-
-    sensor = create_smart_attribute_sensor(
-        hass, mock_coordinator, wwn, attr_id_str_to_test
-    )
-
-    # --- Teste die Komponenten des Namens (mit Fallback) ---
-    # 1. device_info["name"] (wie es vom Sensor gespeichert wird)
-    summary_device_data_for_name = current_test_data[wwn][KEY_SUMMARY_DEVICE]
-    _serial = summary_device_data_for_name.get(ATTR_SERIAL_NUMBER)
-    _id_part = _serial or summary_device_data_for_name.get(ATTR_DEVICE_NAME) or wwn[-6:]
-    expected_device_info_name_in_sensor = (
-        f"{summary_device_data_for_name.get(ATTR_MODEL_NAME, 'Disk')} ({_id_part})"
-    )
-    assert sensor.device_info is not None
-    assert sensor.device_info["name"] == expected_device_info_name_in_sensor  # type: ignore
-
-    # 2. entity_description.name (sollte den Fallback-Namensteil enthalten,
-    #    der von der Sensor-Logik generiert wurde)
-    assert sensor.entity_description.name == expected_fallback_name_part_in_description
-
-    # 3. Überprüfe _attr_has_entity_name
-    assert sensor.has_entity_name is True
-
-    # 4. Überprüfe, dass _attr_name nicht explizit gesetzt ist
-    assert (
-        not hasattr(sensor, "_attr_name")
-        or getattr(sensor, "_attr_name") is None
-        or getattr(sensor, "_attr_name") == getattr(sensor, "_SENTINEL", object())
-    )
-
-    # --- Teste Unique ID (mit Fallback-Namensteil) ---
-    # Der slugifizierte Teil für die ID kommt vom entity_description.name, der den Fallback enthält
-    slugified_attr_name_part_for_id_uid = slugify(
-        expected_fallback_name_part_in_description
-    )
-    expected_unique_id = (
-        f"{DOMAIN}_{wwn}_smart_"
-        f"{slugify(attr_id_str_to_test)}_{slugified_attr_name_part_for_id_uid}"
-    )
-    assert sensor.unique_id == expected_unique_id
-
-    # --- Teste nativen Wert (Status) ---
-    assert sensor.native_value == ATTR_SMART_STATUS_MAP.get(
-        2, ATTR_SMART_STATUS_UNKNOWN
-    )  # "Warning"
+# ---------------------------------------------------------------------------
+# ScrutinySmartAttributeSensor
+# ---------------------------------------------------------------------------
 
 
-    print(
-        f"SUCCESS: test_smart_attribute_sensor_name_fallback for {attr_id_str_to_test} passed!"
-    )
+class TestSmartAttributeSensor(unittest.TestCase):
+    def _make_sensor(self, attr_id="5", data=None, last_success=True):
+        data = data or copy.deepcopy(COORDINATOR_DATA_ONE_DISK)
+        coord = _make_coordinator(data, last_success)
+        device_info = _make_device_info(DISK_ID_1, data)
+        meta = data[DISK_ID_1][KEY_DETAILS_METADATA].get(attr_id, {})
+        return ScrutinySmartAttributeSensor(
+            coordinator=coord,
+            disk_id=DISK_ID_1,
+            device_info=device_info,
+            attribute_id_str=attr_id,
+            attribute_metadata=meta,
+            serial_number=SERIAL1,
+        )
 
+    def test_initial_state_passed(self):
+        sensor = self._make_sensor("5")
+        self.assertTrue(sensor.available)
+        self.assertEqual(sensor.native_value, ATTR_SMART_STATUS_MAP[0])  # "Passed"
 
-@pytest.mark.parametrize(
-    "attr_id_str_to_test, expected_display_name_from_meta, is_numeric_id_case, numeric_id_for_meta_lookup",
-    [
-        # Fall 1: Numerische ID (SATA-Stil), DisplayName ist in Metadaten unter der numerischen ID
-        (
-            "5",
-            COORDINATOR_DATA_ONE_DISK[MOCK_WWN1][KEY_DETAILS_METADATA]["5"][
-                ATTR_DISPLAY_NAME
-            ],
-            True,
-            5,
-        ),
-        # Fall 2: String-basierte ID (NVMe-Stil), DisplayName ist in Metadaten unter der String-ID
-        (
-            "critical_warning_test",
-            "Critical Warning Test Display Name",
-            False,
-            "critical_warning_test",
-        ),
-    ],
-)
-@pytest.mark.asyncio
-async def test_smart_attribute_sensor_basic_init_and_state(
-    hass: HomeAssistant,
-    attr_id_str_to_test: str,
-    expected_display_name_from_meta: str,  # Dies ist der reine ATTR_DISPLAY_NAME Wert
-    is_numeric_id_case: bool,
-    numeric_id_for_meta_lookup: Any,  # Entweder int oder str für den Metadaten-Lookup
-):
-    """Test basic initialization and state of ScrutinySmartAttributeSensor for different ID types."""
-    wwn = MOCK_WWN1
+    def test_unique_id_format(self):
+        from ha_stubs import slugify
 
-    import copy
+        sensor = self._make_sensor("5")
+        display = "Reallocated Sectors Count"
+        self.assertEqual(
+            sensor.unique_id,
+            f"{DOMAIN}_{DISK_ID_1}_smart_{slugify('5')}_{slugify(display)}",
+        )
 
-    current_test_data = copy.deepcopy(COORDINATOR_DATA_ONE_DISK)
+    def test_name_from_metadata(self):
+        sensor = self._make_sensor("5")
+        self.assertEqual(sensor.entity_description.name, "Reallocated Sectors Count")
 
-    # Wenn wir den String-ID-Fall testen, fügen wir die entsprechenden Daten hinzu
-    if not is_numeric_id_case:
-        current_test_data[wwn][KEY_DETAILS_SMART_LATEST][ATTR_SMART_ATTRS][
-            attr_id_str_to_test
-        ] = {
-            ATTR_ATTRIBUTE_ID: attr_id_str_to_test,  # Bei NVMe ist die ID oft der String selbst
-            "value": 10,  # Beispielwert
-            "raw_value": "CustomRaw",
-            ATTR_SMART_ATTRIBUTE_STATUS_CODE: 1,  # Beispielstatus "Failed"
+    def test_name_fallback_numeric_id(self):
+        data = copy.deepcopy(COORDINATOR_DATA_ONE_DISK)
+        data[DISK_ID_1][KEY_DETAILS_SMART_LATEST][ATTR_SMART_ATTRS]["99"] = {
+            ATTR_ATTRIBUTE_ID: 99,
+            "value": 50,
+            ATTR_SMART_ATTRIBUTE_STATUS_CODE: 0,
         }
-        current_test_data[wwn][KEY_DETAILS_METADATA][
-            attr_id_str_to_test
-        ] = {  # Verwende attr_id_str_to_test als Key
-            ATTR_DISPLAY_NAME: expected_display_name_from_meta,
-            ATTR_IS_CRITICAL: True,
-            ATTR_DESCRIPTION: f"Description for {attr_id_str_to_test}",
+        data[DISK_ID_1][KEY_DETAILS_METADATA]["99"] = {}
+        sensor = self._make_sensor("99", data=data)
+        self.assertEqual(sensor.entity_description.name, "Attribute 99")
+
+    def test_name_fallback_string_id(self):
+        data = copy.deepcopy(COORDINATOR_DATA_ONE_DISK)
+        data[DISK_ID_1][KEY_DETAILS_SMART_LATEST][ATTR_SMART_ATTRS]["critical_warning"] = {
+            ATTR_ATTRIBUTE_ID: "critical_warning",
+            "value": 0,
+            ATTR_SMART_ATTRIBUTE_STATUS_CODE: 0,
         }
+        data[DISK_ID_1][KEY_DETAILS_METADATA]["critical_warning"] = {}
+        sensor = self._make_sensor("critical_warning", data=data)
+        self.assertEqual(sensor.entity_description.name, "Critical Warning")
 
-    mock_coordinator = MagicMock(spec=ScrutinyDataUpdateCoordinator)
-    mock_coordinator.data = current_test_data
-    mock_coordinator.last_update_success = True
+    def test_unavailable_when_coordinator_failed(self):
+        sensor = self._make_sensor("5", last_success=False)
+        self.assertFalse(sensor.available)
 
-    sensor = create_smart_attribute_sensor(
-        hass, mock_coordinator, wwn, attr_id_str_to_test
-    )
+    def test_unavailable_when_attribute_missing(self):
+        data = copy.deepcopy(COORDINATOR_DATA_ONE_DISK)
+        del data[DISK_ID_1][KEY_DETAILS_SMART_LATEST][ATTR_SMART_ATTRS]["5"]
+        sensor = self._make_sensor("5", data=data)
+        self.assertFalse(sensor.available)
+        self.assertIsNone(sensor.native_value)
 
-    # --- Teste die Komponenten des Namens ---
-    # 1. device_info["name"]
-    summary_device_data_for_name = current_test_data[wwn][KEY_SUMMARY_DEVICE]
-    _serial = summary_device_data_for_name.get(ATTR_SERIAL_NUMBER)
-    _id_part = _serial or summary_device_data_for_name.get(ATTR_DEVICE_NAME) or wwn[-6:]
-    expected_device_info_name_in_sensor = (
-        f"{summary_device_data_for_name.get(ATTR_MODEL_NAME, 'Disk')} ({_id_part})"
-    )
-    assert sensor.device_info is not None
-    assert sensor.device_info["name"] == expected_device_info_name_in_sensor  # type: ignore
+    def test_handle_coordinator_update_state_change(self):
+        data = copy.deepcopy(COORDINATOR_DATA_ONE_DISK)
+        coord = _make_coordinator(data)
+        meta = data[DISK_ID_1][KEY_DETAILS_METADATA].get("194", {})
+        sensor = ScrutinySmartAttributeSensor(
+            coordinator=coord,
+            disk_id=DISK_ID_1,
+            device_info=_make_device_info(DISK_ID_1, data),
+            attribute_id_str="194",
+            attribute_metadata=meta,
+        )
+        written = []
+        sensor.async_write_ha_state = lambda: written.append(1)
 
-    # 2. entity_description.name (sollte den von der Sensor-Logik bestimmten Namensteil enthalten)
-    #    Die Sensor-Logik ist: if display_name_meta: use display_name_meta; else: fallback.
-    #    In diesem Testfall erwarten wir immer einen display_name_meta.
-    assert sensor.entity_description.name == expected_display_name_from_meta
+        updated = copy.deepcopy(data)
+        updated[DISK_ID_1][KEY_DETAILS_SMART_LATEST][ATTR_SMART_ATTRS]["194"][
+            ATTR_SMART_ATTRIBUTE_STATUS_CODE
+        ] = 2  # Warning
+        coord.data = updated
+        sensor._handle_coordinator_update()
 
-    # 3. Überprüfe _attr_has_entity_name
-    assert sensor.has_entity_name is True
+        self.assertEqual(sensor.native_value, ATTR_SMART_STATUS_MAP[2])
+        self.assertEqual(len(written), 1)
 
-    # 4. Überprüfe, dass _attr_name nicht explizit gesetzt ist
-    assert (
-        not hasattr(sensor, "_attr_name")
-        or getattr(sensor, "_attr_name") is None
-        or getattr(sensor, "_attr_name") == getattr(sensor, "_SENTINEL", object())
-    )
+    def test_handle_coordinator_update_no_write_when_remains_unavailable(self):
+        """Sensor stays unavailable: async_write_ha_state must not be called."""
+        data = copy.deepcopy(COORDINATOR_DATA_ONE_DISK)
+        del data[DISK_ID_1][KEY_DETAILS_SMART_LATEST][ATTR_SMART_ATTRS]["5"]
+        coord = _make_coordinator(data)
+        meta = {}
+        sensor = ScrutinySmartAttributeSensor(
+            coordinator=coord,
+            disk_id=DISK_ID_1,
+            device_info=_make_device_info(DISK_ID_1, data),
+            attribute_id_str="5",
+            attribute_metadata=meta,
+        )
+        # Sensor starts unavailable
+        self.assertIsNone(sensor.native_value)
+        written = []
+        sensor.async_write_ha_state = lambda: written.append(1)
 
-    # --- Teste Unique ID ---
-    # Der slugifizierte Teil für die ID kommt vom entity_description.name
-    slugified_attr_name_part_for_id_uid = slugify(expected_display_name_from_meta)
-    expected_unique_id = (
-        f"{DOMAIN}_{wwn}_smart_"
-        f"{slugify(attr_id_str_to_test)}_{slugified_attr_name_part_for_id_uid}"
-    )
-    assert sensor.unique_id == expected_unique_id
+        sensor._handle_coordinator_update()
+        self.assertEqual(len(written), 0)
 
-    # --- Teste Verfügbarkeit und initialen Zustand (Status) ---
-    assert sensor.available is True
-    expected_status_code = current_test_data[wwn][KEY_DETAILS_SMART_LATEST][
-        ATTR_SMART_ATTRS
-    ][attr_id_str_to_test][ATTR_SMART_ATTRIBUTE_STATUS_CODE]
-    assert sensor.native_value == ATTR_SMART_STATUS_MAP.get(
-        expected_status_code, ATTR_SMART_STATUS_UNKNOWN
-    )
+    def test_extra_attributes_include_raw_value(self):
+        sensor = self._make_sensor("5")
+        attrs = sensor.extra_state_attributes
+        self.assertIn(ATTR_RAW_VALUE, attrs)
+        self.assertEqual(attrs[ATTR_RAW_VALUE], "0")
 
-    # --- Teste Extra State Attributes ---
-    attributes = sensor.extra_state_attributes
-    attribute_data_from_coordinator = current_test_data[wwn][KEY_DETAILS_SMART_LATEST][
-        ATTR_SMART_ATTRS
-    ][attr_id_str_to_test]
-    # Für Metadaten verwenden wir numeric_id_for_meta_lookup als Schlüssel,
-    # da dies der Schlüssel ist, den create_smart_attribute_sensor verwendet,
-    # um die Metadaten basierend auf der *numerischen* ID (oder dem String-Key bei NVMe) zu holen.
-    attribute_metadata_from_coordinator = current_test_data[wwn][KEY_DETAILS_METADATA][
-        str(numeric_id_for_meta_lookup)
-    ]  # Sicherstellen, dass der Key ein String ist
+    def test_when_failed_dash_excluded(self):
+        data = copy.deepcopy(COORDINATOR_DATA_ONE_DISK)
+        data[DISK_ID_1][KEY_DETAILS_SMART_LATEST][ATTR_SMART_ATTRS]["5"][
+            ATTR_WHEN_FAILED
+        ] = "-"
+        sensor = self._make_sensor("5", data=data)
+        self.assertNotIn(ATTR_WHEN_FAILED, sensor.extra_state_attributes)
 
-    assert (
-        attributes[ATTR_ATTRIBUTE_ID]
-        == attribute_data_from_coordinator[ATTR_ATTRIBUTE_ID]
-    )
-    assert attributes[ATTR_RAW_VALUE] == attribute_data_from_coordinator[ATTR_RAW_VALUE]
-    assert attributes[ATTR_NORMALIZED_VALUE] == attribute_data_from_coordinator["value"]
-    assert attributes.get(ATTR_DESCRIPTION) == attribute_metadata_from_coordinator.get(
-        ATTR_DESCRIPTION
-    )
-    assert attributes.get(ATTR_IS_CRITICAL) == attribute_metadata_from_coordinator.get(
-        ATTR_IS_CRITICAL
-    )
-    # attribute_key_id, failure_rate, and status_reason are intentionally omitted
-    # from extra_state_attributes as they provide little value (almost always null).
-    assert "attribute_key_id" not in attributes
-    assert "failure_rate" not in attributes
-    assert "status_reason" not in attributes
+    def test_when_failed_real_value_included(self):
+        data = copy.deepcopy(COORDINATOR_DATA_ONE_DISK)
+        data[DISK_ID_1][KEY_DETAILS_SMART_LATEST][ATTR_SMART_ATTRS]["5"][
+            ATTR_WHEN_FAILED
+        ] = "FAILING_NOW"
+        sensor = self._make_sensor("5", data=data)
+        self.assertEqual(
+            sensor.extra_state_attributes.get(ATTR_WHEN_FAILED), "FAILING_NOW"
+        )
 
 
-    print(
-        f"SUCCESS: test_smart_attribute_sensor_basic_init_and_state for {attr_id_str_to_test} passed!"
-    )
+# ---------------------------------------------------------------------------
+# ScrutinySmartRawValueSensor
+# ---------------------------------------------------------------------------
+
+
+class TestSmartRawValueSensor(unittest.TestCase):
+    def _make_sensor(self, attr_id="5", data=None, last_success=True):
+        data = data or copy.deepcopy(COORDINATOR_DATA_ONE_DISK)
+        coord = _make_coordinator(data, last_success)
+        meta = data[DISK_ID_1][KEY_DETAILS_METADATA].get(attr_id, {})
+        return ScrutinySmartRawValueSensor(
+            coordinator=coord,
+            disk_id=DISK_ID_1,
+            device_info=_make_device_info(DISK_ID_1, data),
+            attribute_id_str=attr_id,
+            attribute_metadata=meta,
+            serial_number=SERIAL1,
+        )
+
+    def test_native_value_is_integer(self):
+        sensor = self._make_sensor("5")
+        self.assertTrue(sensor.available)
+        self.assertEqual(sensor.native_value, 0)  # raw_value "0"
+
+    def test_native_value_non_zero(self):
+        sensor = self._make_sensor("194")
+        self.assertEqual(sensor.native_value, 28)  # raw_value "28"
+
+    def test_unavailable_when_coordinator_failed(self):
+        sensor = self._make_sensor("5", last_success=False)
+        self.assertFalse(sensor.available)
+        self.assertIsNone(sensor.native_value)
+
+    def test_unique_id_format(self):
+        from ha_stubs import slugify
+
+        sensor = self._make_sensor("5")
+        self.assertEqual(
+            sensor.unique_id,
+            f"{DOMAIN}_{DISK_ID_1}_smart_raw_"
+            f"{slugify('5')}_{slugify('Reallocated Sectors Count')}",
+        )
+
+    def test_name_includes_raw_suffix(self):
+        sensor = self._make_sensor("5")
+        self.assertIn("Raw", sensor.entity_description.name)
+
+    def test_extra_attributes_include_raw_string_when_present(self):
+        data = copy.deepcopy(COORDINATOR_DATA_ONE_DISK)
+        data[DISK_ID_1][KEY_DETAILS_SMART_LATEST][ATTR_SMART_ATTRS]["5"][ATTR_RAW_STRING] = (
+            "0 sectors"
+        )
+        sensor = self._make_sensor("5", data=data)
+        self.assertIn(ATTR_RAW_STRING, sensor.extra_state_attributes)
+        self.assertEqual(sensor.extra_state_attributes[ATTR_RAW_STRING], "0 sectors")
+
+    def test_handle_coordinator_update_no_write_when_remains_unavailable(self):
+        data = copy.deepcopy(COORDINATOR_DATA_ONE_DISK)
+        del data[DISK_ID_1][KEY_DETAILS_SMART_LATEST][ATTR_SMART_ATTRS]["5"]
+        coord = _make_coordinator(data)
+        meta = {}
+        sensor = ScrutinySmartRawValueSensor(
+            coordinator=coord,
+            disk_id=DISK_ID_1,
+            device_info=_make_device_info(DISK_ID_1, data),
+            attribute_id_str="5",
+            attribute_metadata=meta,
+        )
+        self.assertIsNone(sensor.native_value)
+        written = []
+        sensor.async_write_ha_state = lambda: written.append(1)
+        sensor._handle_coordinator_update()
+        self.assertEqual(len(written), 0)
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -1,7 +1,5 @@
 """Options flow for the Scrutiny Home Assistant integration."""
 
-from __future__ import annotations
-
 from typing import Any
 
 import voluptuous as vol
@@ -79,7 +77,7 @@ class ScrutinyOptionsFlowHandler(OptionsFlow):
                             ),
                         },
                     )
-            except (TypeError, ValueError):
+            except (TypeError, ValueError):  # fmt: skip
                 errors[CONF_SCAN_INTERVAL] = "invalid_scan_interval"
             except Exception:  # noqa: BLE001
                 LOGGER.exception("Unexpected error validating Scrutiny options")

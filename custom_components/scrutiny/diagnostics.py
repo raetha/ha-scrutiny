@@ -1,7 +1,5 @@
 """Diagnostics support for the Scrutiny integration."""
 
-from __future__ import annotations
-
 from typing import Any
 
 from homeassistant.core import HomeAssistant
@@ -16,6 +14,7 @@ from .const import (
     ATTR_SMART_ATTRS,
     ATTR_SMART_OVERALL_STATUS,
     ATTR_TEMPERATURE,
+    ATTR_WWN,
     CONF_SCAN_INTERVAL,
     CONF_URL,
     CONF_VERIFY_SSL,
@@ -39,14 +38,15 @@ async def async_get_config_entry_diagnostics(
 
     disks: list[dict[str, Any]] = []
     if coordinator.data:
-        for wwn, disk_data in coordinator.data.items():
+        for disk_id, disk_data in coordinator.data.items():
             summary_device: dict[str, Any] = disk_data.get(KEY_SUMMARY_DEVICE, {})
             smart_latest: dict[str, Any] = disk_data.get(KEY_DETAILS_SMART_LATEST, {})
             metadata: dict[str, Any] = disk_data.get(KEY_DETAILS_METADATA, {})
 
             disks.append(
                 {
-                    "wwn": wwn,
+                    "scrutiny_disk_id": disk_id,
+                    "wwn": summary_device.get(ATTR_WWN),
                     "serial_number": summary_device.get(ATTR_SERIAL_NUMBER),
                     "device_name": summary_device.get(ATTR_DEVICE_NAME),
                     "model": summary_device.get(ATTR_MODEL_NAME),
