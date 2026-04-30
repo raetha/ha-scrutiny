@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.1.0 — 2026-04-30
+## [1.1.0] — 2026-04-30
 
 ### Scrutiny 0.9.0 compatibility
 
@@ -70,7 +70,7 @@ Historical entity data will be reset, but no manual cleanup is required.
 - **CI** — matrix testing removed (Python 3.14 only); `ruff format --check` added to
   lint job.
 
-## 1.0.1 — 2026-04-18
+## [1.0.1] — 2026-04-18
 
 ### Bug fixes
 
@@ -91,7 +91,7 @@ Historical entity data will be reset, but no manual cleanup is required.
 - **GitHub Actions deprecation warnings** — updated `actions/checkout` v4 → v6 and
   `actions/setup-python` v5 → v6 (both now run on Node.js 24).
 
-## 1.0.0 — 2026-04-15
+## [1.0.0] — 2026-04-15
 
 Initial public release as a fork of [vitals5/ha_scrutiny](https://github.com/vitals5/ha_scrutiny).
 
@@ -137,3 +137,9 @@ compliance pass.
 All Bronze, Silver, Gold, and Platinum rules satisfied. `quality_scale` set to `gold`
 in `manifest.json` (the maximum accepted value; Platinum is assessed separately by the
 HA core team).
+
+---
+
+[1.1.0]: https://github.com/raetha/ha-scrutiny/compare/v1.0.1...v1.1.0
+[1.0.1]: https://github.com/raetha/ha-scrutiny/compare/v1.0.0...v1.0.1
+[1.0.0]: https://github.com/raetha/ha-scrutiny/releases/tag/v1.0.0
