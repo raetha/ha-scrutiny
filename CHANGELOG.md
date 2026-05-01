@@ -93,7 +93,7 @@ Historical entity data will be reset, but no manual cleanup is required.
 
 ## [1.0.0] — 2026-04-15
 
-Initial public release as a fork of [vitals5/ha_scrutiny](https://github.com/vitals5/ha_scrutiny).
+Initial public release. Originally developed as a fork of [vitals5/ha_scrutiny](https://github.com/vitals5/ha_scrutiny), this is now the primary upstream repository.
 
 This release is a substantial rewrite addressing every open issue and pending PR on the
 upstream repository at the time of the fork, plus a full Home Assistant quality scale
@@ -140,6 +140,6 @@ HA core team).
 
 ---
 
-[1.1.0]: https://github.com/raetha/ha-scrutiny/compare/v1.0.1...v1.1.0
-[1.0.1]: https://github.com/raetha/ha-scrutiny/compare/v1.0.0...v1.0.1
-[1.0.0]: https://github.com/raetha/ha-scrutiny/releases/tag/v1.0.0
+[1.1.0]: https://github.com/vitals5/ha_scrutiny/compare/v1.0.1...v1.1.0
+[1.0.1]: https://github.com/vitals5/ha_scrutiny/compare/v1.0.0...v1.0.1
+[1.0.0]: https://github.com/vitals5/ha_scrutiny/releases/tag/v1.0.0
