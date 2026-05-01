@@ -1,5 +1,23 @@
 # Changelog
 
+## [1.1.1] — 2026-04-30
+
+### Repository
+
+- Transferred to [vitals5/ha_scrutiny](https://github.com/vitals5/ha_scrutiny) as the
+  primary upstream repository.
+- `manifest.json` — `codeowners` updated to `["@vitals5", "@raetha"]`; `documentation`
+  and `issue_tracker` URLs updated to the upstream repository.
+- `LICENSE` — added `Copyright (c) 2024 vitals5` to correctly reflect the original
+  author alongside the fork author.
+- `README.md` — HACS badge updated from "Custom" to "Default" (the integration is in
+  the default HACS catalog); install instructions simplified accordingly; banner image
+  restored; attribution and all repository URLs updated to upstream.
+- `CONTRIBUTING.md` — repository URL updated to upstream.
+- `CHANGELOG.md` — compare links updated to upstream repository.
+- `.github/FUNDING.yml` — removed (personal funding link, not appropriate in a shared
+  upstream repository).
+
 ## [1.1.0] — 2026-04-30
 
 ### Scrutiny 0.9.0 compatibility
@@ -140,6 +158,7 @@ HA core team).
 
 ---
 
+[1.1.1]: https://github.com/vitals5/ha_scrutiny/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/vitals5/ha_scrutiny/compare/v1.0.1...v1.1.0
 [1.0.1]: https://github.com/vitals5/ha_scrutiny/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/vitals5/ha_scrutiny/releases/tag/v1.0.0
